@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: sig_tsunami_db
+    environment:
+      POSTGRES_USER: tsunami
+      POSTGRES_PASSWORD: tsunami123
+      POSTGRES_DB: sig_tsunami
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./database/migrations/001_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql
+      - ./database/seeds/002_seed.sql:/docker-entrypoint-initdb.d/002_seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tsunami -d sig_tsunami"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: sig_tsunami_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tsunami:tsunami123@db:5432/sig_tsunami
+      SECRET_KEY: supersecretkey_tsunami_2024
+      ENVIRONMENT: development
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    container_name: sig_tsunami_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:8000
+      REACT_APP_WS_URL: ws://localhost:8000
+      SKIP_PREFLIGHT_CHECK: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/src:/app/src
+      - /app/node_modules
+    command: npm start
+
+volumes:
+  pg_data:
