@@ -162,11 +162,11 @@ export default function Dashboard({ sensors, detection, alertHistory, sirenHisto
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={180}>
                 <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="name" stroke="#475569" tick={{ fontSize: 10 }} />
                   <YAxis stroke="#475569" tick={{ fontSize: 10 }} domain={['auto', 'auto']} />
                   <Tooltip
-                    contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', fontSize: 11 }}
+                    contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', fontSize: 11, color: '#1f2937' }}
                     labelStyle={{ color: '#94a3b8' }}
                   />
                   <Line type="monotone" dataKey="level" stroke="#06b6d4" strokeWidth={2} dot={false} name="Level (cm)" />

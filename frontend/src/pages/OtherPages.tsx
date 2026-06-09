@@ -197,7 +197,7 @@ function EvacRouteModal({
           </div>
           <div>
             <div className="text-dim" style={{ fontSize:11, marginBottom:8 }}>Klik peta untuk menambah titik rute. Titik pertama adalah awal, titik terakhir adalah akhir.</div>
-            <div style={{ height:420, borderRadius:8, overflow:'hidden', border:'1px solid #1e293b' }}>
+            <div style={{ height:420, borderRadius:8, overflow:'hidden', border:'1px solid #e2e8f0' }}>
               <MapContainer center={coords[0] ? toLatLng(coords[0]) : DEFAULT_PANJANG_CENTER} zoom={coords[0] ? 14 : 13} style={{ height:'100%', width:'100%' }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
                 <RouteDrawHandler onAdd={addCoord} />
@@ -266,7 +266,7 @@ const assetLabel = (type: string) => EQUIPMENT_LABELS[type] || type || 'Lainnya'
 
 const markerIcon = (label: string, color: string) => L.divIcon({
   className: 'asset-div-icon',
-  html: `<div style="background:${color};color:#020817;border:2px solid #f8fafc;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.35)">${label}</div>`,
+  html: `<div style="background:${color};color:#ffffff;border:2px solid #ffffff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;box-shadow:0 4px 12px rgba(15,23,42,.18)">${label}</div>`,
   iconSize: [34, 34],
   iconAnchor: [17, 17],
   popupAnchor: [0, -17],
@@ -456,7 +456,7 @@ function FacilityAssetModal({
           </div>
           <div>
             <div className="text-dim" style={{ fontSize:11, marginBottom:8 }}>Klik peta untuk memilih atau memindahkan titik.</div>
-            <div style={{ height:380, borderRadius:8, overflow:'hidden', border:'1px solid #1e293b' }}>
+            <div style={{ height:380, borderRadius:8, overflow:'hidden', border:'1px solid #e2e8f0' }}>
               <MapContainer center={selectedPoint ? [form.latitude, form.longitude] : DEFAULT_PANJANG_CENTER} zoom={selectedPoint ? 16 : 13} style={{ height:'100%', width:'100%' }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
                 <LocationPicker onPick={pickLocation} />
@@ -556,9 +556,9 @@ export function Evakuasi({ sirenActive, user }: any) {
           <div className="card-title">Titik Kumpul & Zona Aman</div>
           <StateBox loading={safeZones.loading} error={safeZones.error} empty={safeZones.data.length === 0} />
           {safeZones.data.map(s => (
-            <div key={s.id} onClick={() => { setSelectedZoneId(s.id); setSelectedRouteId(''); }} style={{ padding:'10px 8px', borderBottom:'1px solid #1e293b', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', background: selectedZoneId === s.id ? 'rgba(34,197,94,0.12)' : 'transparent', borderLeft: selectedZoneId === s.id ? '3px solid #22c55e' : '3px solid transparent' }}>
+            <div key={s.id} onClick={() => { setSelectedZoneId(s.id); setSelectedRouteId(''); }} style={{ padding:'10px 8px', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', background: selectedZoneId === s.id ? 'rgba(25,135,84,0.10)' : 'transparent', borderLeft: selectedZoneId === s.id ? '3px solid #198754' : '3px solid transparent' }}>
               <div>
-                <div style={{ fontSize:12, color:'#f1f5f9', fontWeight:600 }}>{s.name}</div>
+                <div style={{ fontSize:12, color:'#1f2937', fontWeight:600 }}>{s.name}</div>
                 <div style={{ fontSize:11, color:'#475569' }}>Elevasi {s.elevation_m}m · Kapasitas {Number(s.capacity || 0).toLocaleString('id-ID')} · {s.facilities?.join(', ') || '-'}</div>
               </div>
               <span className="badge" style={{ background:'rgba(34,197,94,0.15)', color:'#22c55e' }}>AMAN</span>
@@ -578,7 +578,7 @@ export function Evakuasi({ sirenActive, user }: any) {
         </div>
         {(routes.error || safeZones.error) && <div className="infobox" style={{ borderColor:'#ef4444', color:'#ef4444' }}>Peta tidak dapat memuat seluruh data evakuasi.</div>}
         {!routes.loading && !safeZones.loading && routes.data.length === 0 && <div className="text-dim" style={{ padding: 12 }}>Belum ada jalur evakuasi terverifikasi. Silakan tambahkan jalur melalui akun Admin.</div>}
-        <div style={{ height: 460, borderRadius: 8, overflow: 'hidden', border: '1px solid #1e293b' }}>
+        <div style={{ height: 460, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
           <MapContainer center={mapCenter} zoom={13} style={{ height: '100%', width: '100%', background: '#0a1628' }}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
             <EvacuationMapFocus selectedRoute={selectedRoute} selectedZone={selectedZone} />
@@ -617,7 +617,7 @@ export function Evakuasi({ sirenActive, user }: any) {
                       Jumlah titik: {coords.length}
                     </Popup>
                   </Polyline>
-                  <CircleMarker center={toLatLng(start)} radius={7} pathOptions={{ color, fillColor:'#0f172a', fillOpacity:1, weight:3 }}>
+                  <CircleMarker center={toLatLng(start)} radius={7} pathOptions={{ color, fillColor:'#ffffff', fillOpacity:1, weight:3 }}>
                     <Popup><b>Titik awal</b><br />{route.name}</Popup>
                   </CircleMarker>
                   <CircleMarker center={toLatLng(end)} radius={8} pathOptions={{ color:'#22c55e', fillColor:color, fillOpacity:0.9, weight:2 }}>
@@ -714,7 +714,7 @@ export function Fasilitas({ user }: { user?: User }) {
         <StateBox loading={facilities.loading} error={facilities.error} empty={visible.length === 0} />
         {!facilities.loading && visible.length === 0 && <div className="text-dim" style={{ padding:12 }}>Belum ada titik fasilitas. Silakan tambahkan data melalui akun Admin.</div>}
         <table className="data-table"><thead><tr><th>Nama</th><th>Tipe</th><th>Telepon</th><th>Alamat</th><th>Lokasi</th><th>Aksi</th></tr></thead><tbody>
-          {visible.map(f => <tr key={f.id} onClick={() => { setSelectedFacilityId(f.id); setSelectedEquipmentId(''); }} style={{ cursor:'pointer', background: selectedFacilityId === f.id ? 'rgba(6,182,212,0.12)' : 'transparent', outline: selectedFacilityId === f.id ? '1px solid rgba(6,182,212,0.35)' : undefined }}><td style={{ color:'#f1f5f9', fontWeight:600 }}>{facilityIcon(f.type)} {f.name}</td><td><span className="badge" style={{ background: (FACILITY_COLORS[f.type] || '#757575')+'22', color: FACILITY_COLORS[f.type] || '#757575' }}>{facilityLabel(f.type)}</span></td><td style={{ fontFamily:'monospace', color:'#06b6d4' }}>{f.phone || '-'}</td><td style={{ color:'#94a3b8', fontSize:11 }}>{f.address || '-'}</td><td style={{ color: isValidPoint(f) ? '#64748b' : '#ef4444', fontSize:10 }}>{coordinateText(f)}</td><td onClick={e => e.stopPropagation()}>{isAdmin ? <div style={{ display:'flex', gap:6 }}><button className="btn btn-outline btn-sm" onClick={() => setModal({ kind:'facility', item:f })}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => deleteItem('facility', f)}>Hapus</button></div> : <span className="text-dim">Lihat</span>}</td></tr>)}
+          {visible.map(f => <tr key={f.id} onClick={() => { setSelectedFacilityId(f.id); setSelectedEquipmentId(''); }} style={{ cursor:'pointer', background: selectedFacilityId === f.id ? 'rgba(15,76,129,0.10)' : 'transparent', outline: selectedFacilityId === f.id ? '1px solid rgba(15,76,129,0.25)' : undefined }}><td style={{ color:'#1f2937', fontWeight:600 }}>{facilityIcon(f.type)} {f.name}</td><td><span className="badge" style={{ background: (FACILITY_COLORS[f.type] || '#757575')+'22', color: FACILITY_COLORS[f.type] || '#757575' }}>{facilityLabel(f.type)}</span></td><td style={{ fontFamily:'monospace', color:'#0f4c81' }}>{f.phone || '-'}</td><td style={{ color:'#64748b', fontSize:11 }}>{f.address || '-'}</td><td style={{ color: isValidPoint(f) ? '#64748b' : '#dc3545', fontSize:10 }}>{coordinateText(f)}</td><td onClick={e => e.stopPropagation()}>{isAdmin ? <div style={{ display:'flex', gap:6 }}><button className="btn btn-outline btn-sm" onClick={() => setModal({ kind:'facility', item:f })}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => deleteItem('facility', f)}>Hapus</button></div> : <span className="text-dim">Lihat</span>}</td></tr>)}
         </tbody></table>
       </div>
       <div className="card">
@@ -722,7 +722,7 @@ export function Fasilitas({ user }: { user?: User }) {
         <StateBox loading={equipment.loading} error={equipment.error} empty={equipment.data.length === 0} />
         {!equipment.loading && equipment.data.length === 0 && <div className="text-dim" style={{ padding:12 }}>Belum ada titik aset. Silakan tambahkan data melalui akun Admin.</div>}
         <table className="data-table"><thead><tr><th>Nama</th><th>Tipe</th><th>Status</th><th>Lokasi</th><th>Aksi</th></tr></thead><tbody>
-          {equipment.data.map(e => <tr key={e.id} onClick={() => { setSelectedEquipmentId(e.id); setSelectedFacilityId(''); }} style={{ cursor:'pointer', background: selectedEquipmentId === e.id ? 'rgba(250,204,21,0.12)' : 'transparent', outline: selectedEquipmentId === e.id ? '1px solid rgba(250,204,21,0.35)' : undefined }}><td style={{ color:'#f1f5f9' }}>{assetIcon(e.type)} {e.name}</td><td style={{ color:'#94a3b8' }}>{assetLabel(e.type)}</td><td><span className="badge" style={{ background: equipmentColor(e.status)+'22', color: equipmentColor(e.status) }}>{e.status.toUpperCase()}</span></td><td style={{ color: isValidPoint(e) ? '#64748b' : '#ef4444', fontSize:10 }}>{coordinateText(e)}</td><td onClick={ev => ev.stopPropagation()}>{isAdmin ? <div style={{ display:'flex', gap:6 }}><button className="btn btn-outline btn-sm" onClick={() => setModal({ kind:'equipment', item:e })}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => deleteItem('equipment', e)}>Hapus</button></div> : <span className="text-dim">Lihat</span>}</td></tr>)}
+          {equipment.data.map(e => <tr key={e.id} onClick={() => { setSelectedEquipmentId(e.id); setSelectedFacilityId(''); }} style={{ cursor:'pointer', background: selectedEquipmentId === e.id ? 'rgba(245,158,11,0.12)' : 'transparent', outline: selectedEquipmentId === e.id ? '1px solid rgba(245,158,11,0.30)' : undefined }}><td style={{ color:'#1f2937' }}>{assetIcon(e.type)} {e.name}</td><td style={{ color:'#64748b' }}>{assetLabel(e.type)}</td><td><span className="badge" style={{ background: equipmentColor(e.status)+'22', color: equipmentColor(e.status) }}>{e.status.toUpperCase()}</span></td><td style={{ color: isValidPoint(e) ? '#64748b' : '#dc3545', fontSize:10 }}>{coordinateText(e)}</td><td onClick={ev => ev.stopPropagation()}>{isAdmin ? <div style={{ display:'flex', gap:6 }}><button className="btn btn-outline btn-sm" onClick={() => setModal({ kind:'equipment', item:e })}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => deleteItem('equipment', e)}>Hapus</button></div> : <span className="text-dim">Lihat</span>}</td></tr>)}
         </tbody></table>
       </div>
       <div className="card">
@@ -738,7 +738,7 @@ export function Fasilitas({ user }: { user?: User }) {
         {(invalidFacilities > 0 || invalidEquipment > 0) && <div className="infobox" style={{ borderColor:'#f97316', color:'#f97316' }}>{invalidFacilities + invalidEquipment} titik lokasi berada di luar area validasi dan tidak dirender sebagai marker.</div>}
         {!facilities.loading && !equipment.loading && facilities.data.length === 0 && equipment.data.length === 0 && <div className="text-dim" style={{ padding: 12 }}>Belum ada titik fasilitas atau aset. Silakan tambahkan data melalui akun Admin.</div>}
         {!facilities.loading && !equipment.loading && facilities.data.length + equipment.data.length > 0 && validFacilities.length === 0 && validEquipment.length === 0 && <div className="text-dim" style={{ padding: 12 }}>Belum ada fasilitas atau aset dengan koordinat valid.</div>}
-        <div style={{ height: 460, borderRadius: 8, overflow: 'hidden', border: '1px solid #1e293b' }}>
+        <div style={{ height: 460, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
           <MapContainer center={DEFAULT_PANJANG_CENTER} zoom={14} style={{ height:'100%', width:'100%', background:'#0a1628' }}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
             <FacilitiesFitBounds facilities={showFacilities ? validFacilities : []} equipment={showEquipment ? validEquipment : []} />
@@ -797,10 +797,10 @@ export function StatusPerangkat({ connected }: any) {
       <div className="flex justify-between items-center mb-12"><div className="text-dim">Status aktual dari database dan WebSocket.</div><button className="btn btn-outline btn-sm" onClick={() => { sensors.load(); sirens.load(); health.load(); }}>Refresh</button></div>
       <div className="grid-2">
         <div className="card"><div className="card-title">Status Sensor</div><StateBox loading={sensors.loading} error={sensors.error} empty={sensors.data.length === 0} />
-          <table className="data-table"><thead><tr><th>Kode</th><th>Level</th><th>Status</th><th>Quality</th><th>Last Seen</th></tr></thead><tbody>{sensors.data.map(s => <tr key={s.id}><td style={{ fontFamily:'monospace', color:'#f1f5f9' }}>{s.code}</td><td style={{ color:'#06b6d4', fontFamily:'monospace' }}>{s.water_level_cm ? `${Number(s.water_level_cm).toFixed(1)}cm` : '-'}</td><td>{s.status}</td><td>{s.quality || '-'}</td><td style={{ color:'#64748b', fontSize:10 }}>{s.last_seen ? new Date(s.last_seen).toLocaleString('id-ID') : '-'}</td></tr>)}</tbody></table>
+          <table className="data-table"><thead><tr><th>Kode</th><th>Level</th><th>Status</th><th>Quality</th><th>Last Seen</th></tr></thead><tbody>{sensors.data.map(s => <tr key={s.id}><td style={{ fontFamily:'monospace', color:'#1f2937' }}>{s.code}</td><td style={{ color:'#0f4c81', fontFamily:'monospace' }}>{s.water_level_cm ? `${Number(s.water_level_cm).toFixed(1)}cm` : '-'}</td><td>{s.status}</td><td>{s.quality || '-'}</td><td style={{ color:'#64748b', fontSize:10 }}>{s.last_seen ? new Date(s.last_seen).toLocaleString('id-ID') : '-'}</td></tr>)}</tbody></table>
         </div>
         <div className="card"><div className="card-title">Status Sirine</div><StateBox loading={sirens.loading} error={sirens.error} empty={sirens.data.length === 0} />
-          <table className="data-table"><thead><tr><th>Kode</th><th>Nama</th><th>Status</th><th>Auto</th><th>Last Update</th></tr></thead><tbody>{sirens.data.map(s => <tr key={s.id}><td style={{ fontFamily:'monospace', color:'#f1f5f9' }}>{s.code}</td><td>{s.name}</td><td>{s.status}</td><td>{s.is_auto_enabled ? 'Ya' : 'Tidak'}</td><td style={{ color:'#64748b', fontSize:10 }}>{s.last_activated ? new Date(s.last_activated).toLocaleString('id-ID') : '-'}</td></tr>)}</tbody></table>
+          <table className="data-table"><thead><tr><th>Kode</th><th>Nama</th><th>Status</th><th>Auto</th><th>Last Update</th></tr></thead><tbody>{sirens.data.map(s => <tr key={s.id}><td style={{ fontFamily:'monospace', color:'#1f2937' }}>{s.code}</td><td>{s.name}</td><td>{s.status}</td><td>{s.is_auto_enabled ? 'Ya' : 'Tidak'}</td><td style={{ color:'#64748b', fontSize:10 }}>{s.last_activated ? new Date(s.last_activated).toLocaleString('id-ID') : '-'}</td></tr>)}</tbody></table>
         </div>
       </div>
       <div className="grid-3">

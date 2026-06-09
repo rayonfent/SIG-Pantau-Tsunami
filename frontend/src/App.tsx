@@ -289,7 +289,7 @@ export default function App() {
       {/* Main content */}
       <main className="main-content">
         {/* Top bar */}
-        <header className="topbar" style={{ borderBottomColor: detection.level !== 'normal' ? levelColor : '#1e293b' }}>
+        <header className="topbar" style={{ borderBottomColor: detection.level !== 'normal' ? levelColor : '#e2e8f0' }}>
           <div className="topbar-left">
             <h1 className="page-title">{PAGES.find(p => p.id === activePage)?.label}</h1>
           </div>
@@ -371,6 +371,7 @@ const STATUS_GUIDE: Record<string, string> = {
 };
 
 function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, connected }: PublicPortalProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [data, setData] = useState<PublicData>({
     mapSensors: [],
     sirens: [],
@@ -427,25 +428,43 @@ function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, 
   const levelColor = LEVEL_COLORS[detection.level] || '#22c55e';
   const publicData = { ...data, mapSensors: mergedSensors };
   const common = { data: publicData, loading, error, lastUpdated, detection, sirenActive, connected, navigate, refresh: loadPublicData };
+  const goPublic = (path: string) => {
+    navigate(path);
+    setMenuOpen(false);
+  };
 
   return (
     <div className="public-root">
+      <div className="public-govbar">
+        <div className="public-govbar-inner">
+          <span>Sistem Informasi Publik Kebencanaan</span>
+          <span>Panjang, Bandar Lampung</span>
+          <span>{new Date().toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</span>
+          <span>{connected ? 'Realtime aktif' : 'Menyambungkan realtime'}</span>
+        </div>
+      </div>
       <header className="public-header">
         <div className="public-header-inner">
+          <div className="public-agency-mark" aria-hidden="true">BP</div>
           <div className="public-brand">
             <h1>SIG-PANTAU TSUNAMI</h1>
-            <p>Sistem Informasi Publik Deteksi Dini Tsunami</p>
+            <p>Sistem Informasi Geografis Deteksi Dini Tsunami</p>
             <span>Panjang, Bandar Lampung</span>
           </div>
           <div className="public-status" style={{ borderColor: levelColor, color: levelColor, background: levelColor + '18' }}>
             <span className={`level-dot ${detection.level !== 'normal' ? 'pulse' : ''}`} style={{ background: levelColor }} />
             {detection.level.toUpperCase()}
           </div>
+          <button className="public-menu-toggle" aria-label="Buka navigasi publik" onClick={() => setMenuOpen(v => !v)}>
+            <span />
+            <span />
+            <span />
+          </button>
         </div>
-        <nav className="public-nav" aria-label="Navigasi portal publik">
+        <nav className={`public-nav ${menuOpen ? 'open' : ''}`} aria-label="Navigasi portal publik">
           {PUBLIC_NAV.map(item => (
-            <button key={item.path} className={activePath === item.path ? 'active' : ''} onClick={() => navigate(item.path)}>
-              {item.label}
+            <button key={item.path} className={activePath === item.path ? 'active' : ''} onClick={() => goPublic(item.path)}>
+              {item.path === '/' ? 'Beranda' : item.label}
             </button>
           ))}
         </nav>
@@ -460,6 +479,16 @@ function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, 
         {activePath === '/public/evacuation' && <PublicEvacuationPage {...common} />}
         {activePath === '/public/alerts' && <PublicAlertsPage {...common} />}
       </main>
+      <footer className="public-footer">
+        <div className="public-footer-inner">
+          <div>
+            <strong>SIG-PANTAU TSUNAMI</strong>
+            <p>Sistem Informasi Publik Deteksi Dini Tsunami<br />Panjang, Bandar Lampung</p>
+          </div>
+          <p>Informasi pada portal ini digunakan sebagai panduan awal. Ikuti arahan petugas dan informasi resmi saat kondisi darurat.</p>
+          <span>© 2026 Pemerintah Daerah</span>
+        </div>
+      </footer>
     </div>
   );
 }
@@ -763,7 +792,7 @@ function renderRoute(r: any, selected = false) {
       <Polyline positions={coords.map(toLatLng)} pathOptions={{ color, weight:selected ? 8 : 5, opacity:0.9 }}>
         <Popup><b>{r.name}</b><br />Status: {String(r.status || '-').toUpperCase()}<br />Arah: {r.direction || '-'}<br />Keterangan: {r.description || r.notes || '-'}<br />Kapasitas: {Number(r.capacity_persons || 0).toLocaleString('id-ID')} orang<br />Jarak: {(Number(r.distance_m || 0) / 1000).toFixed(1)} km<br />Estimasi Waktu: {r.estimated_time_min || '-'} menit<br />Prioritas: {r.priority || '-'}</Popup>
       </Polyline>
-      <CircleMarker center={toLatLng(start)} radius={6} pathOptions={{ color, fillColor:'#0f172a', fillOpacity:1, weight:3 }}><Popup>Titik awal<br />{r.name}</Popup></CircleMarker>
+      <CircleMarker center={toLatLng(start)} radius={6} pathOptions={{ color, fillColor:'#ffffff', fillOpacity:1, weight:3 }}><Popup>Titik awal<br />{r.name}</Popup></CircleMarker>
       <CircleMarker center={toLatLng(end)} radius={7} pathOptions={{ color:'#22c55e', fillColor:color, fillOpacity:0.9, weight:2 }}><Popup>Titik akhir<br />{r.name}</Popup></CircleMarker>
     </React.Fragment>
   );

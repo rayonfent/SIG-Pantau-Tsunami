@@ -35,7 +35,7 @@ const CUSTOM_POINT_META: Record<string, { icon: string; color: string; label: st
 
 const mapDivIcon = (label: string, color: string) => L.divIcon({
   className: 'asset-div-icon',
-  html: `<div style="background:${color};color:#020817;border:2px solid #f8fafc;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.35)">${label}</div>`,
+  html: `<div style="background:${color};color:#ffffff;border:2px solid #ffffff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;box-shadow:0 4px 12px rgba(15,23,42,.18)">${label}</div>`,
   iconSize: [34, 34],
   iconAnchor: [17, 17],
   popupAnchor: [0, -17],
@@ -137,14 +137,14 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
         {loadingLayers && <div className="infobox" style={{ fontSize: 10 }}>Memuat layer peta...</div>}
         {loadError && <div className="infobox" style={{ fontSize: 10, borderColor: '#ef4444', color: '#ef4444' }}>{loadError}</div>}
         {Object.entries(layers).map(([key, on]) => (
-          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 11, color: on ? '#f1f5f9' : '#475569' }}>
+          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 11, color: on ? '#1f2937' : '#64748b' }}>
             <input type="checkbox" checked={on} onChange={() => toggleLayer(key)} style={{ accentColor: '#06b6d4' }} />
             {key.replace('_', ' ').toUpperCase()}
           </label>
         ))}
 
         {isAdmin && (
-          <div style={{ borderTop: '1px solid #1e293b', paddingTop: 8 }}>
+          <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
             <div className="section-title">Admin Titik Peta</div>
             <button
               className={`btn ${addPointMode ? 'btn-danger' : 'btn-primary'}`}
@@ -163,7 +163,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
           </div>
         )}
 
-        <div style={{ marginTop: 8, borderTop: '1px solid #1e293b', paddingTop: 8 }}>
+        <div style={{ marginTop: 8, borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
           <div className="section-title">Legenda Sensor</div>
           {[
             { color: '#22c55e', label: 'Normal' },
@@ -187,7 +187,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
           ))}
         </div>
 
-        <div style={{ borderTop: '1px solid #1e293b', paddingTop: 8, fontSize: 10, color: '#475569' }}>
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, fontSize: 10, color: '#64748b' }}>
           <div style={{ marginBottom: 4 }}>
             <span style={{ display: 'inline-block', width: 24, height: 4, background: '#22c55e', marginRight: 6 }} />
             Jalur Clear
@@ -215,7 +215,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
       </div>
 
       {/* Map */}
-      <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #1e293b' }}>
+      <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
         <MapContainer
           center={[-5.4712, 105.2756]}
           zoom={14}

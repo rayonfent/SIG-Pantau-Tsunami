@@ -71,14 +71,14 @@ export default function SimulasiDrill({ sensors, detection, mode, user }: Props)
                 display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer',
                 padding: '10px', borderRadius: 6, marginBottom: 6,
                 background: scenario === s.id ? 'rgba(6,182,212,0.1)' : 'transparent',
-                border: `1px solid ${scenario === s.id ? '#06b6d4' : '#1e293b'}`,
+                border: `1px solid ${scenario === s.id ? '#0f4c81' : '#e2e8f0'}`,
                 transition: 'all 0.15s'
               }}>
                 <input type="radio" name="scenario" value={s.id}
                   checked={scenario === s.id} onChange={() => setScenario(s.id)}
                   style={{ marginTop: 2, accentColor: '#06b6d4' }} />
                 <div>
-                  <div style={{ fontSize: 12, color: '#f1f5f9', fontWeight: 600 }}>{s.label}</div>
+                  <div style={{ fontSize: 12, color: '#1f2937', fontWeight: 600 }}>{s.label}</div>
                   <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>{s.desc}</div>
                 </div>
               </label>
@@ -166,7 +166,7 @@ export default function SimulasiDrill({ sensors, detection, mode, user }: Props)
           {Object.values(sensors).map(s => (
             <div key={s.sensor_id} style={{
               padding: 12, borderRadius: 6,
-              background: '#0f172a', border: '1px solid #1e293b',
+              background: '#ffffff', border: '1px solid #e2e8f0',
             }}>
               <div style={{ fontSize: 10, color: '#475569', marginBottom: 4 }}>{s.code}</div>
               <div style={{ fontSize: 22, fontWeight: 700, color: '#06b6d4', fontFamily: 'monospace' }}>

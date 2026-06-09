@@ -38,9 +38,9 @@ export default function DeteksiAlert({ sensors, detection, alertHistory }: Props
               ].map(r => (
                 <tr key={r.l}>
                   <td><span className="badge" style={{ background: r.c + '22', color: r.c }}>{r.l.toUpperCase()}</span></td>
-                  <td style={{ color: '#f1f5f9', fontFamily: 'monospace', fontSize: 11 }}>{r.d}</td>
-                  <td style={{ color: '#f1f5f9', fontFamily: 'monospace', fontSize: 11 }}>{r.r}</td>
-                  <td style={{ color: '#f1f5f9', fontFamily: 'monospace', fontSize: 11 }}>{r.z}</td>
+                  <td style={{ color: '#1f2937', fontFamily: 'monospace', fontSize: 11 }}>{r.d}</td>
+                  <td style={{ color: '#1f2937', fontFamily: 'monospace', fontSize: 11 }}>{r.r}</td>
+                  <td style={{ color: '#1f2937', fontFamily: 'monospace', fontSize: 11 }}>{r.z}</td>
                 </tr>
               ))}
             </tbody>
@@ -73,7 +73,7 @@ export default function DeteksiAlert({ sensors, detection, alertHistory }: Props
               else if (d3 >= 15) rowColor = 'rgba(234,179,8,0.08)';
               return (
                 <tr key={s.sensor_id} style={{ background: rowColor }}>
-                  <td style={{ color: '#f1f5f9' }}>{s.code}<div style={{ fontSize: 10, color: '#475569' }}>{s.name}</div></td>
+                  <td style={{ color: '#1f2937' }}>{s.code}<div style={{ fontSize: 10, color: '#64748b' }}>{s.name}</div></td>
                   <td style={{ color: '#06b6d4', fontFamily: 'monospace' }}>{s.water_level_cm?.toFixed(1)}</td>
                   <td style={{ color: (s.delta_1m || 0) > 0 ? '#ef4444' : '#22c55e', fontFamily: 'monospace' }}>
                     {(s.delta_1m || 0) > 0 ? '+' : ''}{(s.delta_1m || 0).toFixed(1)}
