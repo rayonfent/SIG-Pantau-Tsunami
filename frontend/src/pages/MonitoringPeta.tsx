@@ -123,7 +123,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
       });
 
       if (failedLayers.length > 0) {
-        setLoadError(`Sebagian layer gagal dimuat: ${failedLayers.map(layer => layer.replace('_', ' ')).join(', ')}.`);
+        setLoadError(`Sebagian layer gagal dimuat: ${failedLayers.map(layer => layer.replace(/_/g, ' ')).join(', ')}.`);
       }
 
       setLoadingLayers(false);
@@ -165,7 +165,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
         {Object.entries(layers).map(([key, on]) => (
           <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 11, color: on ? '#1f2937' : '#64748b' }}>
             <input type="checkbox" checked={on} onChange={() => toggleLayer(key)} style={{ accentColor: '#06b6d4' }} />
-            {key.replace('_', ' ').toUpperCase()}
+            {key.replace(/_/g, ' ').toUpperCase()}
           </label>
         ))}
         <div style={{ marginTop: 8, borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>

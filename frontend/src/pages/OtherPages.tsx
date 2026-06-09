@@ -50,6 +50,17 @@ const isValidRouteCoordinate = ([lng, lat]: RouteCoordinate) => (
   lng >= PROJECT_BOUNDS.minLng && lng <= PROJECT_BOUNDS.maxLng
 );
 
+const parseCoordinateInput = (value: string) => Number(String(value).replace(',', '.'));
+
+const reverseGeocode = async (lat: number, lng: number) => {
+  const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error('Gagal mengambil alamat otomatis.');
+  const data = await response.json();
+  return data?.display_name || '';
+};
+
 const routeDistancePreview = (coords: RouteCoordinate[]) => {
   const toRad = (v: number) => (v * Math.PI) / 180;
   let meters = 0;
@@ -66,8 +77,19 @@ const routeDistancePreview = (coords: RouteCoordinate[]) => {
 
 const editableRouteWaypoints = (route: EvacRoute | null): RouteCoordinate[] => {
   const coords = route ? routeCoords(route) : [];
-  if (coords.length <= 25) return coords;
-  return [coords[0], coords[coords.length - 1]].filter(Boolean) as RouteCoordinate[];
+  if (coords.length <= 12) return coords;
+  const sampled: RouteCoordinate[] = [];
+  const targetPoints = Math.min(12, coords.length);
+  const step = (coords.length - 1) / (targetPoints - 1);
+  for (let index = 0; index < targetPoints; index += 1) {
+    const coord = coords[Math.round(index * step)];
+    if (!coord) continue;
+    if (!sampled.length || sampled[sampled.length - 1][0] !== coord[0] || sampled[sampled.length - 1][1] !== coord[1]) {
+      sampled.push(coord);
+    }
+  }
+  if (sampled.length < 2 && coords.length >= 2) return [coords[0], coords[coords.length - 1]];
+  return sampled;
 };
 
 const fetchRoadRoute = async (waypoints: RouteCoordinate[]): Promise<RouteCoordinate[]> => {
@@ -119,6 +141,7 @@ function EvacRouteModal({
   const initialWaypoints = editableRouteWaypoints(route);
   const [waypoints, setWaypoints] = useState<RouteCoordinate[]>(initialWaypoints);
   const [coords, setCoords] = useState<RouteCoordinate[]>(route ? routeCoords(route) : []);
+  const [manualPoint, setManualPoint] = useState({ latitude: '', longitude: '' });
   const [routing, setRouting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -142,6 +165,13 @@ function EvacRouteModal({
     } finally {
       setRouting(false);
     }
+  };
+
+  const addManualCoord = async () => {
+    const latitude = parseCoordinateInput(manualPoint.latitude);
+    const longitude = parseCoordinateInput(manualPoint.longitude);
+    await addCoord([longitude, latitude]);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) setManualPoint({ latitude: '', longitude: '' });
   };
 
   const addCoord = async (coord: RouteCoordinate) => {
@@ -227,6 +257,11 @@ function EvacRouteModal({
               <div><label className="text-dim" style={{ fontSize:11 }}>Status *</label><select className="form-input" value={form.status} onChange={e => setForm(f => ({ ...f, status:e.target.value as any }))}>{ROUTE_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div>
               <div><label className="text-dim" style={{ fontSize:11 }}>Prioritas *</label><select className="form-input" value={form.priority} onChange={e => setForm(f => ({ ...f, priority:Number(e.target.value) }))}>{[1,2,3,4,5].map(p => <option key={p} value={p}>{p}</option>)}</select></div>
             </div>
+            <div className="grid-2">
+              <div><label className="text-dim" style={{ fontSize:11 }}>Latitude Waypoint</label><input className="form-input" value={manualPoint.latitude} onChange={e => setManualPoint(p => ({ ...p, latitude:e.target.value }))} placeholder="-5.468900" /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Longitude Waypoint</label><input className="form-input" value={manualPoint.longitude} onChange={e => setManualPoint(p => ({ ...p, longitude:e.target.value }))} placeholder="105.319700" /></div>
+            </div>
+            <button className="btn btn-outline btn-sm" onClick={addManualCoord} disabled={saving || routing}>Tambah Waypoint dari Koordinat</button>
             <div className="infobox" style={{ fontSize:11 }}>
               Waypoint admin: {waypoints.length}<br />
               Titik hasil routing jalan: {coords.length}<br />
@@ -305,6 +340,26 @@ const validationText = (item: { latitude?: number; longitude?: number; lat?: num
   return 'Terverifikasi frontend';
 };
 
+const closePolygon = (coords: RouteCoordinate[]) => {
+  if (!coords.length) return coords;
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) return coords;
+  return [...coords, first];
+};
+
+const safeZoneCoordinates = (zone: SafeZone | null): RouteCoordinate[] => {
+  if (!zone) return [];
+  const coords = zoneCoords(zone);
+  if (coords.length < 2) return coords;
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) return coords.slice(0, -1);
+  return coords;
+};
+
+const isValidZoneCoordinate = (coord: RouteCoordinate) => isValidRouteCoordinate(coord);
+
 const facilityIcon = (type: string) => FACILITY_ICONS[type] || FACILITY_ICONS.lainnya || 'FAS';
 const facilityLabel = (type: string) => FACILITY_LABELS[type] || type || 'Lainnya';
 const assetIcon = (type: string) => EQUIPMENT_ICONS[type] || EQUIPMENT_ICONS.lainnya || 'AST';
@@ -363,6 +418,142 @@ function FacilitiesFitBounds({ facilities, equipment }: { facilities: Facility[]
 
 type FacilityAssetKind = 'facility' | 'equipment';
 
+function SafeZoneModal({
+  zone, onClose, onSaved,
+}: {
+  zone: SafeZone | null;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) {
+  const [form, setForm] = useState({
+    name: zone?.name || '',
+    elevation_m: zone?.elevation_m ?? 0,
+    capacity: zone?.capacity ?? 0,
+    current_count: zone?.current_count ?? 0,
+    facilities: zone?.facilities?.join(', ') || '',
+  });
+  const [coords, setCoords] = useState<RouteCoordinate[]>(safeZoneCoordinates(zone));
+  const [manualPoint, setManualPoint] = useState({ latitude: '', longitude: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const polygonPreview = closePolygon(coords);
+
+  const addManualCoord = () => {
+    const latitude = parseCoordinateInput(manualPoint.latitude);
+    const longitude = parseCoordinateInput(manualPoint.longitude);
+    addCoord([longitude, latitude]);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) setManualPoint({ latitude: '', longitude: '' });
+  };
+
+  const addCoord = (coord: RouteCoordinate) => {
+    if (!isValidZoneCoordinate(coord)) {
+      setError('Titik zona aman berada di luar area operasional Bandar Lampung.');
+      return;
+    }
+    setCoords(prev => [...prev, coord]);
+    setNotice('Titik batas zona aman ditambahkan.');
+    setError('');
+  };
+
+  const validate = () => {
+    if (!form.name.trim()) return 'Nama zona aman wajib diisi.';
+    if (Number(form.capacity) < 0) return 'Kapasitas tidak boleh negatif.';
+    if (Number(form.current_count) < 0) return 'Jumlah penghuni saat ini tidak boleh negatif.';
+    if (coords.length < 3) return 'Zona aman membutuhkan minimal 3 titik.';
+    if (!coords.every(isValidZoneCoordinate)) return 'Ada titik zona aman di luar area operasional Bandar Lampung.';
+    return '';
+  };
+
+  const save = async () => {
+    const validation = validate();
+    if (validation) {
+      setError(validation);
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const payload = {
+        name: form.name.trim(),
+        elevation_m: Number(form.elevation_m),
+        capacity: Number(form.capacity),
+        current_count: Number(form.current_count),
+        facilities: form.facilities.split(',').map(item => item.trim()).filter(Boolean),
+        is_active: true,
+        notes: '',
+        coordinates: closePolygon(coords),
+      };
+      if (zone) await dataApi.updateSafeZone(zone.id, payload);
+      else await dataApi.createSafeZone(payload);
+      onSaved(zone ? 'Zona aman berhasil diperbarui.' : 'Zona aman berhasil ditambahkan.');
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Gagal menyimpan zona aman.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(2,8,23,0.78)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+      <div className="card" style={{ width:'min(1040px, 96vw)', maxHeight:'92vh', overflow:'auto' }}>
+        <div className="flex justify-between items-center mb-12">
+          <div className="card-title" style={{ margin:0 }}>{zone ? 'Edit' : 'Tambah'} Zona Aman</div>
+          <button className="btn btn-outline btn-sm" onClick={onClose} disabled={saving}>Batal</button>
+        </div>
+        {notice && <div className="infobox" style={{ borderColor:'#22c55e', color:'#22c55e' }}>{notice}</div>}
+        {error && <div className="infobox" style={{ borderColor:'#ef4444', color:'#ef4444' }}>{error}</div>}
+        <div className="grid-2">
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <label className="text-dim" style={{ fontSize:11 }}>Nama Zona Aman *</label>
+            <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name:e.target.value }))} />
+            <div className="grid-2">
+              <div><label className="text-dim" style={{ fontSize:11 }}>Elevasi (m)</label><input className="form-input" type="number" value={form.elevation_m} onChange={e => setForm(f => ({ ...f, elevation_m:Number(e.target.value) }))} /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Kapasitas</label><input className="form-input" type="number" value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity:Number(e.target.value) }))} /></div>
+            </div>
+            <div className="grid-2">
+              <div><label className="text-dim" style={{ fontSize:11 }}>Jumlah Saat Ini</label><input className="form-input" type="number" value={form.current_count} onChange={e => setForm(f => ({ ...f, current_count:Number(e.target.value) }))} /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Jumlah Titik</label><input className="form-input" readOnly value={coords.length} /></div>
+            </div>
+            <label className="text-dim" style={{ fontSize:11 }}>Fasilitas (pisahkan dengan koma)</label>
+            <textarea className="form-input" rows={3} value={form.facilities} onChange={e => setForm(f => ({ ...f, facilities:e.target.value }))} />
+            <div className="grid-2">
+              <div><label className="text-dim" style={{ fontSize:11 }}>Latitude Titik Zona</label><input className="form-input" value={manualPoint.latitude} onChange={e => setManualPoint(p => ({ ...p, latitude:e.target.value }))} placeholder="-5.468900" /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Longitude Titik Zona</label><input className="form-input" value={manualPoint.longitude} onChange={e => setManualPoint(p => ({ ...p, longitude:e.target.value }))} placeholder="105.319700" /></div>
+            </div>
+            <button className="btn btn-outline btn-sm" onClick={addManualCoord} disabled={saving}>Tambah Titik dari Koordinat</button>
+            <div className="infobox" style={{ fontSize:11 }}>
+              Klik peta untuk menambah titik batas zona aman. Minimal 3 titik untuk membentuk polygon.
+            </div>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+              <button className="btn btn-primary" onClick={save} disabled={saving || coords.length < 3}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
+              <button className="btn btn-outline" onClick={() => { setCoords(prev => prev.slice(0, -1)); setNotice('Titik terakhir dihapus.'); }} disabled={saving || coords.length === 0}>Hapus Titik Terakhir</button>
+              <button className="btn btn-outline" onClick={() => { setCoords([]); setNotice('Batas zona aman direset.'); }} disabled={saving || coords.length === 0}>Reset Zona</button>
+              <button className="btn btn-outline" onClick={onClose} disabled={saving}>Batal</button>
+            </div>
+          </div>
+          <div>
+            <div className="text-dim" style={{ fontSize:11, marginBottom:8 }}>Klik peta untuk menggambar area aman. Gunakan beberapa titik agar bentuk area sesuai kondisi lapangan.</div>
+            <div style={{ height:420, borderRadius:8, overflow:'hidden', border:'1px solid #e2e8f0' }}>
+              <MapContainer center={coords[0] ? toLatLng(coords[0]) : DEFAULT_PANJANG_CENTER} zoom={coords[0] ? 15 : 13} style={{ height:'100%', width:'100%' }}>
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+                <RouteDrawHandler onAdd={addCoord} />
+                {polygonPreview.length >= 3 && <Polygon positions={polygonPreview.map(toLatLng)} pathOptions={{ color:'#22c55e', fillOpacity:0.22, weight:3 }} />}
+                {coords.map((coord, idx) => (
+                  <CircleMarker key={`${coord[0]}-${coord[1]}-${idx}`} center={toLatLng(coord)} radius={idx === 0 ? 7 : 5} pathOptions={{ color:'#22c55e', fillColor:'#ffffff', fillOpacity:1, weight:3 }}>
+                    <Popup>Titik {idx + 1}<br />{coord[1].toFixed(6)}, {coord[0].toFixed(6)}</Popup>
+                  </CircleMarker>
+                ))}
+              </MapContainer>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FacilityAssetModal({
   kind, item, onClose, onSaved,
 }: {
@@ -395,10 +586,21 @@ function FacilityAssetModal({
     setError('');
   };
 
-  const pickLocation = (latitude: number, longitude: number) => {
+  const pickLocation = async (latitude: number, longitude: number) => {
     setForm(prev => ({ ...prev, latitude, longitude }));
-    setNotice('Titik lokasi berhasil dipilih.');
+    setNotice('Titik lokasi berhasil dipilih. Mengambil alamat otomatis...');
     setError('');
+    try {
+      const address = await reverseGeocode(latitude, longitude);
+      if (address) {
+        setForm(prev => ({ ...prev, latitude, longitude, address: isEquipment ? prev.address : address }));
+        setNotice(isEquipment ? 'Titik lokasi berhasil dipilih.' : 'Titik lokasi berhasil dipilih dan alamat otomatis terisi.');
+      } else {
+        setNotice('Titik lokasi berhasil dipilih, tetapi alamat otomatis tidak ditemukan.');
+      }
+    } catch {
+      setNotice('Titik lokasi berhasil dipilih, tetapi alamat otomatis gagal dimuat.');
+    }
   };
 
   const validate = () => {
@@ -491,8 +693,8 @@ function FacilityAssetModal({
             <label className="text-dim" style={{ fontSize:11 }}>Keterangan</label>
             <textarea className="form-input" rows={4} value={form.description} onChange={e => setField('description', e.target.value)} />
             <div className="grid-2">
-              <div><label className="text-dim" style={{ fontSize:11 }}>Latitude *</label><input className="form-input" readOnly value={hasPoint ? form.latitude.toFixed(6) : ''} /></div>
-              <div><label className="text-dim" style={{ fontSize:11 }}>Longitude *</label><input className="form-input" readOnly value={hasPoint ? form.longitude.toFixed(6) : ''} /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Latitude *</label><input className="form-input" value={Number.isFinite(form.latitude) ? String(form.latitude) : ''} onChange={e => setField('latitude', parseCoordinateInput(e.target.value))} placeholder="-5.468900" /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Longitude *</label><input className="form-input" value={Number.isFinite(form.longitude) ? String(form.longitude) : ''} onChange={e => setField('longitude', parseCoordinateInput(e.target.value))} placeholder="105.319700" /></div>
             </div>
             <div style={{ display:'flex', gap:8 }}>
               <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
@@ -536,6 +738,7 @@ export function Evakuasi({ sirenActive, user }: any) {
   const [selectedZoneId, setSelectedZoneId] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
   const [routeModal, setRouteModal] = useState<EvacRoute | null | undefined>(undefined);
+  const [zoneModal, setZoneModal] = useState<SafeZone | null | undefined>(undefined);
   const [message, setMessage] = useState('');
   const [actionError, setActionError] = useState('');
   const isAdmin = user?.role === 'admin';
@@ -573,11 +776,28 @@ export function Evakuasi({ sirenActive, user }: any) {
       setActionError(err?.response?.data?.detail || 'Gagal menghapus jalur evakuasi.');
     }
   };
+  const deleteZone = async (zone: SafeZone) => {
+    if (!isAdmin) {
+      setActionError('Anda tidak memiliki izin untuk mengubah zona aman.');
+      return;
+    }
+    if (!window.confirm(`Hapus ${zone.name}?`)) return;
+    setActionError('');
+    try {
+      await dataApi.deleteSafeZone(zone.id);
+      if (selectedZoneId === zone.id) setSelectedZoneId('');
+      setMessage('Zona aman berhasil dihapus.');
+      await refreshAll();
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || 'Gagal menghapus zona aman.');
+    }
+  };
   return (
     <div className="page-section">
       {routeModal !== undefined && <EvacRouteModal route={routeModal} onClose={() => setRouteModal(undefined)} onSaved={handleRouteSaved} />}
+      {zoneModal !== undefined && <SafeZoneModal zone={zoneModal} onClose={() => setZoneModal(undefined)} onSaved={async (msg) => { setZoneModal(undefined); setMessage(msg); setActionError(''); await refreshAll(); }} />}
       {sirenActive && <div style={{ padding:16, borderRadius:8, background:'rgba(239,68,68,0.15)', border:'1px solid #ef4444', color:'#ef4444', fontWeight:700, textAlign:'center', fontSize:14, animation:'blink 1s infinite' }}>SIRINE AKTIF - SEGERA EVAKUASI SEKARANG</div>}
-      <div className="flex justify-between items-center mb-12"><div className="text-dim">Data jalur dan zona aman dari database. Last update: {lastUpdated || '-'}</div><div style={{ display:'flex', gap:8 }}>{isAdmin && <button className="btn btn-primary btn-sm" onClick={() => setRouteModal(null)}>+ Tambah Jalur Evakuasi</button>}<button className="btn btn-outline btn-sm" onClick={refreshAll} disabled={routes.loading || safeZones.loading}>Refresh</button></div></div>
+      <div className="flex justify-between items-center mb-12"><div className="text-dim">Data jalur dan zona aman dari database. Last update: {lastUpdated || '-'}</div><div style={{ display:'flex', gap:8 }}>{isAdmin && <button className="btn btn-primary btn-sm" onClick={() => setRouteModal(null)}>+ Tambah Jalur Evakuasi</button>}{isAdmin && <button className="btn btn-primary btn-sm" onClick={() => setZoneModal(null)}>+ Tambah Zona Aman</button>}<button className="btn btn-outline btn-sm" onClick={refreshAll} disabled={routes.loading || safeZones.loading}>Refresh</button></div></div>
       {!isAdmin && <div className="infobox">Anda masuk sebagai {user?.role?.toUpperCase() || 'USER'}. Jalur evakuasi hanya dapat diubah oleh Admin.</div>}
       {message && <div className="infobox" style={{ borderColor:'#22c55e', color:'#22c55e' }}>{message}</div>}
       {actionError && <div className="infobox" style={{ borderColor:'#ef4444', color:'#ef4444' }}>{actionError}</div>}
@@ -607,7 +827,10 @@ export function Evakuasi({ sirenActive, user }: any) {
                 <div style={{ fontSize:12, color:'#1f2937', fontWeight:600 }}>{s.name}</div>
                 <div style={{ fontSize:11, color:'#475569' }}>Elevasi {s.elevation_m}m · Kapasitas {Number(s.capacity || 0).toLocaleString('id-ID')} · {s.facilities?.join(', ') || '-'}</div>
               </div>
-              <span className="badge" style={{ background:'rgba(34,197,94,0.15)', color:'#22c55e' }}>AMAN</span>
+              <div onClick={e => e.stopPropagation()} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span className="badge" style={{ background:'rgba(34,197,94,0.15)', color:'#22c55e' }}>AMAN</span>
+                {isAdmin && <div style={{ display:'flex', gap:6 }}><button className="btn btn-outline btn-sm" onClick={() => setZoneModal(s)}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => deleteZone(s)}>Hapus</button></div>}
+              </div>
             </div>
           ))}
         </div>
@@ -873,10 +1096,23 @@ function DevicePointModal({
     setError('');
   };
 
-  const pickLocation = (lat: number, lng: number) => {
+  const pickLocation = async (lat: number, lng: number) => {
     setForm(prev => ({ ...prev, lat, lng }));
     setNotice('Koordinat titik berhasil dipilih/dipindahkan.');
     setError('');
+    if (!isSensor) return;
+    setNotice('Koordinat titik berhasil dipilih/dipindahkan. Mengambil alamat otomatis...');
+    try {
+      const address = await reverseGeocode(lat, lng);
+      if (address) {
+        setForm(prev => ({ ...prev, lat, lng, address }));
+        setNotice('Koordinat titik berhasil dipilih/dipindahkan dan alamat otomatis terisi.');
+      } else {
+        setNotice('Koordinat titik berhasil dipilih/dipindahkan, tetapi alamat otomatis tidak ditemukan.');
+      }
+    } catch {
+      setNotice('Koordinat titik berhasil dipilih/dipindahkan, tetapi alamat otomatis gagal dimuat.');
+    }
   };
 
   const validate = () => {
@@ -971,8 +1207,8 @@ function DevicePointModal({
               </>
             )}
             <div className="grid-2">
-              <div><label className="text-dim" style={{ fontSize:11 }}>Latitude *</label><input className="form-input" readOnly value={Number.isFinite(form.lat) ? form.lat.toFixed(6) : ''} /></div>
-              <div><label className="text-dim" style={{ fontSize:11 }}>Longitude *</label><input className="form-input" readOnly value={Number.isFinite(form.lng) ? form.lng.toFixed(6) : ''} /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Latitude *</label><input className="form-input" value={Number.isFinite(form.lat) ? String(form.lat) : ''} onChange={e => setField('lat', parseCoordinateInput(e.target.value))} placeholder="-5.468900" /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Longitude *</label><input className="form-input" value={Number.isFinite(form.lng) ? String(form.lng) : ''} onChange={e => setField('lng', parseCoordinateInput(e.target.value))} placeholder="105.319700" /></div>
             </div>
             <div className="infobox" style={{ fontSize:11 }}>Klik peta atau drag marker untuk memindahkan titik perangkat ke layer operasional.</div>
             <div style={{ display:'flex', gap:8 }}>

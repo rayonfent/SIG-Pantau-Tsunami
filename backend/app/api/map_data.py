@@ -301,6 +301,31 @@ async def map_heavy_equipment():
         await conn.close()
 
 
+@router.get("/custom-points")
+async def map_custom_points():
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id::text,
+                name,
+                description,
+                type::text,
+                created_by,
+                created_at,
+                ST_X(location::geometry) AS lng,
+                ST_Y(location::geometry) AS lat
+            FROM custom_map_points
+            WHERE is_active = TRUE
+            ORDER BY created_at DESC, name
+            """
+        )
+        return {"custom_points": [dict(row) for row in rows]}
+    finally:
+        await conn.close()
+
+
 @router.post("/inundation-zones", status_code=201)
 async def create_inundation_zone(req: InundationPayload, authorization: Optional[str] = Header(default=None)):
     user = _require_admin(authorization)
