@@ -14,6 +14,7 @@ api.interceptors.request.use((config) => {
 export const mapApi = {
   config:       () => api.get('/map/config'),
   layers:       () => api.get('/map/layers'),
+  status:       () => api.get('/map/status'),
   sensors:      () => api.get('/map/sensors'),
   sirens:       () => api.get('/map/sirens'),
   facilities:   () => api.get('/map/facilities'),

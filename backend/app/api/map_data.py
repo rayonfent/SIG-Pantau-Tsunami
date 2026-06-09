@@ -2,6 +2,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 from typing import Optional
+import json
 
 import asyncpg
 
@@ -53,6 +54,10 @@ def _polygon_wkt(coords: list[list[float]]) -> str:
         raise HTTPException(status_code=422, detail="Zona membutuhkan minimal 3 koordinat")
     closed = coords if coords[0] == coords[-1] else [*coords, coords[0]]
     return "POLYGON((" + ", ".join(f"{lng} {lat}" for lng, lat in closed) + "))"
+
+
+def _geometry(value):
+    return json.loads(value) if isinstance(value, str) else value
 
 
 async def _audit(conn: asyncpg.Connection, username: str, action: str, entity_type: str, entity_id: str, reason: str):
@@ -320,7 +325,7 @@ async def map_inundation():
         zones = []
         for row in rows:
             item = dict(row)
-            item["coordinates"] = item.pop("geojson")["coordinates"][0]
+            item["coordinates"] = _geometry(item.pop("geojson"))["coordinates"][0]
             zones.append(item)
         return {"zones": zones}
     finally:
