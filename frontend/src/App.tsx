@@ -71,6 +71,11 @@ export default function App() {
   const [currentAlert, setCurrentAlert] = useState<AlertEvent | null>(null);
   const [sirenActive, setSirenActive] = useState(false);
   const [mode, setMode] = useState<'live' | 'simulation'>('live');
+  const [simulationPreview, setSimulationPreview] = useState<{
+    running: boolean;
+    sensors?: Record<string, SensorData>;
+    detection?: DetectionState;
+  }>({ running: false });
   const [authMessage, setAuthMessage] = useState('');
   const { connected } = useWebSocket(useCallback((msg) => {
     if (msg.event === 'sensor_update') {
@@ -165,6 +170,53 @@ export default function App() {
     }
   };
 
+  const effectiveSensors = simulationPreview.running && simulationPreview.sensors ? simulationPreview.sensors : sensors;
+  const effectiveDetection = simulationPreview.running && simulationPreview.detection ? simulationPreview.detection : detection;
+  const effectiveSirenActive = simulationPreview.running && simulationPreview.detection ? simulationPreview.detection.siren_active : sirenActive;
+  const effectiveMode = simulationPreview.running ? 'simulation' : mode;
+
+  useEffect(() => {
+    const stored = localStorage.getItem('sig-tsunami-simulation-preview');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed?.running) setSimulationPreview(parsed);
+      } catch {
+        localStorage.removeItem('sig-tsunami-simulation-preview');
+      }
+    }
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== 'sig-tsunami-simulation-preview') return;
+      if (!event.newValue) {
+        setSimulationPreview({ running: false });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(event.newValue);
+        setSimulationPreview(parsed?.running ? parsed : { running: false });
+      } catch {
+        setSimulationPreview({ running: false });
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const handleSimulationPreview = useCallback((payload: {
+    running: boolean;
+    sensors?: Record<string, SensorData>;
+    detection?: DetectionState;
+  }) => {
+    setSimulationPreview(payload);
+    if (payload.running) {
+      localStorage.setItem('sig-tsunami-simulation-preview', JSON.stringify(payload));
+    } else {
+      localStorage.removeItem('sig-tsunami-simulation-preview');
+    }
+  }, []);
+
   const isLoginRoute = currentPath === '/login';
   const isAdminRoute = currentPath.startsWith('/admin');
 
@@ -183,19 +235,29 @@ export default function App() {
       <PublicPortal
         currentPath={currentPath}
         navigate={navigate}
-        sensors={sensors}
-        detection={detection}
-        sirenActive={sirenActive}
+        sensors={effectiveSensors}
+        detection={effectiveDetection}
+        sirenActive={effectiveSirenActive}
         connected={connected}
       />
     );
   }
 
-  const levelColor = LEVEL_COLORS[detection.level];
-  const levelLabel = LEVEL_LABEL[detection.level];
+  const levelColor = LEVEL_COLORS[effectiveDetection.level];
+  const levelLabel = LEVEL_LABEL[effectiveDetection.level];
 
   const renderPage = () => {
-    const commonProps = { sensors, detection, alertHistory, sirenHistory, sirenActive, connected, mode, user };
+    const commonProps = { 
+      sensors: effectiveSensors, 
+      detection: effectiveDetection, 
+      alertHistory, 
+      sirenHistory, 
+      sirenActive: effectiveSirenActive, 
+      connected, 
+      mode: effectiveMode, 
+      user,
+      onSimulationPreview: handleSimulationPreview,
+    };
     switch (activePage) {
       case 'dashboard':   return <Dashboard {...commonProps} />;
       case 'monitoring':  return <MonitoringPeta {...commonProps} />;
@@ -372,6 +434,9 @@ const STATUS_GUIDE: Record<string, string> = {
 
 function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, connected }: PublicPortalProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showPublicWarning, setShowPublicWarning] = useState(false);
+  const previousPublicLevel = useRef<AlertLevel>('normal');
+  const publicSirenAudioRef = useRef<HTMLAudioElement | null>(null);
   const [data, setData] = useState<PublicData>({
     mapSensors: [],
     sirens: [],
@@ -420,6 +485,33 @@ function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, 
 
   useEffect(() => { loadPublicData(); }, [loadPublicData]);
 
+  useEffect(() => {
+    const previousLevel = previousPublicLevel.current;
+    const isDanger = detection.level === 'awas' || sirenActive;
+
+    if (isDanger && previousLevel !== detection.level) {
+      setShowPublicWarning(true);
+
+      const sirenAudio = publicSirenAudioRef.current;
+      if (sirenAudio) {
+        sirenAudio.volume = 1;
+        sirenAudio.currentTime = 0;
+        sirenAudio.play().catch(() => undefined);
+      }
+    }
+
+    if (detection.level === 'normal' && previousLevel !== 'normal') {
+      setShowPublicWarning(false);
+
+      const sirenAudio = publicSirenAudioRef.current;
+      if (sirenAudio) {
+        sirenAudio.volume = 0.05;
+      }
+    }
+
+    previousPublicLevel.current = detection.level;
+  }, [detection.level, sirenActive]);
+
   const mergedSensors = data.mapSensors.map(ms => {
     const live = Object.values(sensors).find(s => s.sensor_id === ms.id || s.code === ms.code);
     return { ...ms, water_level_cm: live?.water_level_cm ?? ms.water_level_cm, delta_3m: live?.delta_3m ?? ms.delta_3m ?? 0 };
@@ -427,10 +519,20 @@ function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, 
   const activePath = PUBLIC_NAV.some(item => item.path === currentPath) ? currentPath : '/';
   const levelColor = LEVEL_COLORS[detection.level] || '#22c55e';
   const publicData = { ...data, mapSensors: mergedSensors };
+  const activeAwas = detection.level === 'awas' || publicData.alerts.some((a: any) => String(a.level).toLowerCase() === 'awas');
+  // Use detection and sirenActive from props (already effectiveDetection/effectiveSirenActive from parent)
   const common = { data: publicData, loading, error, lastUpdated, detection, sirenActive, connected, navigate, refresh: loadPublicData };
   const goPublic = (path: string) => {
     navigate(path);
     setMenuOpen(false);
+  };
+
+  const handleClosePublicWarning = () => {
+    setShowPublicWarning(false);
+    const sirenAudio = publicSirenAudioRef.current;
+    if (sirenAudio) {
+      sirenAudio.volume = 0.05;
+    }
   };
 
   return (
@@ -443,6 +545,12 @@ function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, 
           <span>{connected ? 'Realtime aktif' : 'Menyambungkan realtime'}</span>
         </div>
       </div>
+      <audio
+        ref={publicSirenAudioRef}
+        src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg"
+        loop
+        preload="auto"
+      />
       <header className="public-header">
         <div className="public-header-inner">
           <div className="public-agency-mark" aria-hidden="true">BP</div>
@@ -470,8 +578,18 @@ function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, 
         </nav>
       </header>
 
+      {showPublicWarning && (
+          <PublicWarningPopup
+            detection={detection}
+            sirenActive={sirenActive}
+            onClose={handleClosePublicWarning}
+            navigate={navigate}
+          />
+      )}
+
       <main className="public-main">
         <PublicSystemState loading={loading} error={error} lastUpdated={lastUpdated} connected={connected} refresh={loadPublicData} />
+        {activeAwas && <PublicEmergencyBanner navigate={navigate} />}
         {activePath === '/' && <PublicDashboard {...common} />}
         {activePath === '/public/map' && <PublicMapPage {...common} />}
         {activePath === '/public/risk-zones' && <PublicRiskZonesPage {...common} />}
@@ -506,9 +624,94 @@ function PublicSystemState({ loading, error, lastUpdated, connected, refresh }: 
   );
 }
 
+function PublicWarningPopup({ detection, sirenActive, onClose, navigate }: any) {
+  const levelColor = LEVEL_COLORS[detection.level] || '#ef4444';
+  const title = detection.level === 'awas' ? 'PERINGATAN TSUNAMI AWAS' : 'PERINGATAN DINI TSUNAMI';
+  const instruction = STATUS_GUIDE[detection.level] || STATUS_GUIDE.awas;
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(2, 6, 23, 0.72)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 5000,
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          width: 'min(680px, 100%)',
+          background: '#ffffff',
+          borderRadius: 20,
+          border: `4px solid ${levelColor}`,
+          boxShadow: '0 24px 80px rgba(15, 23, 42, 0.35)',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ background: levelColor, color: '#fff', padding: '18px 22px' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1.2 }}>STATUS DARURAT PUBLIK</div>
+          <div style={{ fontSize: 30, fontWeight: 800, marginTop: 6 }}>{title}</div>
+        </div>
+        <div style={{ padding: 24 }}>
+          <p style={{ fontSize: 18, fontWeight: 700, margin: '0 0 12px', color: '#0f172a' }}>
+            {instruction}
+          </p>
+          <p style={{ margin: '0 0 18px', color: '#334155', lineHeight: 1.6 }}>
+            Portal publik sedang menampilkan status simulasi/peringatan terbaru. Masyarakat diminta mengikuti
+            jalur evakuasi, menuju zona aman atau fasilitas terdekat, dan menunggu informasi resmi lanjutan.
+          </p>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: 12,
+              marginBottom: 20,
+            }}
+          >
+            <div className="stat-box">
+              <div className="stat-label">Status</div>
+              <div className="stat-value" style={{ color: levelColor }}>{String(detection.level).toUpperCase()}</div>
+            </div>
+            <div className="stat-box">
+              <div className="stat-label">Sirine</div>
+              <div className="stat-value" style={{ color: sirenActive ? '#ef4444' : '#22c55e' }}>
+                {sirenActive ? 'AKTIF' : 'SIAGA'}
+              </div>
+            </div>
+            <div className="stat-box">
+              <div className="stat-label">Keyakinan</div>
+              <div className="stat-value">
+                {Math.round((Number(detection.confidence_score) || 0) * 100)}%
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+            <button className="btn btn-primary" onClick={() => { navigate('/public/evacuation'); onClose(); }}>
+              Lihat Jalur Evakuasi
+            </button>
+            <button className="btn btn-outline" onClick={() => { navigate('/public/facilities'); onClose(); }}>
+              Lihat Fasilitas
+            </button>
+            <button className="btn btn-outline" onClick={onClose}>
+              Tutup Pesan
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PublicDashboard({ data, detection, sirenActive, lastUpdated, navigate }: any) {
   const levelColor = LEVEL_COLORS[detection.level] || '#22c55e';
-  const activeAwas = data.alerts.some((a: any) => String(a.level).toLowerCase() === 'awas');
+  const activeAwas = detection.level === 'awas' || data.alerts.some((a: any) => String(a.level).toLowerCase() === 'awas');
+  const activeAlertCount = Math.max(data.alerts.length, detection.level === 'normal' ? 0 : 1);
   const statusText = activeAwas
     ? 'Peringatan AWAS aktif. Segera ikuti arahan evakuasi.'
     : detection.level === 'normal'
@@ -517,12 +720,11 @@ function PublicDashboard({ data, detection, sirenActive, lastUpdated, navigate }
 
   return (
     <div className="page-section">
-      {activeAwas && <PublicEmergencyBanner navigate={navigate} />}
       <div className="grid-4 public-stat-grid">
         <div className="stat-box"><div className="stat-label">Status Tsunami</div><div className="stat-value" style={{ color: levelColor }}>{detection.level.toUpperCase()}</div><div className="stat-sub">{STATUS_GUIDE[detection.level] || STATUS_GUIDE.normal}</div></div>
         <div className="stat-box"><div className="stat-label">Keyakinan Sistem</div><div className="stat-value">{Math.round((detection.confidence_score || 0) * 100)}%</div><div className="stat-sub">{detection.confidence_label || 'low'}</div></div>
         <div className="stat-box"><div className="stat-label">Sirine Publik</div><div className="stat-value" style={{ color: sirenActive ? '#ef4444' : '#22c55e' }}>{sirenActive ? 'AKTIF' : detection.level === 'normal' ? 'NORMAL' : 'SIAGA'}</div><div className="stat-sub">Status informasi masyarakat</div></div>
-        <div className="stat-box"><div className="stat-label">Alert Aktif</div><div className="stat-value">{data.alerts.length}</div><div className="stat-sub">Update {lastUpdated || '-'}</div></div>
+        <div className="stat-box"><div className="stat-label">Alert Aktif</div><div className="stat-value">{activeAlertCount}</div><div className="stat-sub">Update {lastUpdated || '-'}</div></div>
       </div>
 
       <div className="card public-summary">
@@ -640,6 +842,7 @@ function PublicFacilitiesPage({ data, loading, error, lastUpdated, refresh }: an
 function PublicEvacuationPage({ data, loading, error, lastUpdated, refresh }: any) {
   const [selectedRouteId, setSelectedRouteId] = useState('');
   const selectedRoute = data.routes.find((r: any) => r.id === selectedRouteId) || null;
+  const selectedRouteGoogleMapsUrl = selectedRoute ? buildGoogleMapsRouteUrl(selectedRoute) : '';
 
   return (
     <div className="page-section">
@@ -651,7 +854,11 @@ function PublicEvacuationPage({ data, loading, error, lastUpdated, refresh }: an
           {loading && <StateLine text="Data sedang dimuat..." />}
           {!loading && data.routes.length === 0 && <StateLine text="Belum ada jalur evakuasi terverifikasi." />}
           {data.routes.map((r: any) => (
-            <button key={r.id} className={`public-route-card ${selectedRouteId === r.id ? 'selected' : ''}`} onClick={() => setSelectedRouteId(r.id)}>
+            <button
+              key={r.id}
+              className={`public-route-card ${selectedRouteId === r.id ? 'selected' : ''}`}
+              onClick={() => setSelectedRouteId(prev => prev === r.id ? '' : r.id)}
+            >
               <span className="route-status-dot" style={{ background: routeColor(r.status) }} />
               <span>
                 <strong>{r.name}</strong>
@@ -659,6 +866,21 @@ function PublicEvacuationPage({ data, loading, error, lastUpdated, refresh }: an
               </span>
             </button>
           ))}
+          {selectedRoute && (
+            <div className="infobox" style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Rute terpilih: {selectedRoute.name}</div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button className="btn btn-outline" onClick={() => setSelectedRouteId('')}>
+                  Tampilkan Semua Jalur
+                </button>
+                {selectedRouteGoogleMapsUrl && (
+                  <button className="btn btn-primary" onClick={() => window.open(selectedRouteGoogleMapsUrl, '_blank', 'noopener,noreferrer')}>
+                    Buka Rute di Google Maps
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <Legend items={[['clear', 'Aman'], ['warning', 'Waspada'], ['blocked', 'Terblokir'], ['maintenance', 'Pemeliharaan']]} colorFor={routeColor} />
         </div>
         <div className="card">
@@ -670,13 +892,12 @@ function PublicEvacuationPage({ data, loading, error, lastUpdated, refresh }: an
   );
 }
 
-function PublicAlertsPage({ data, detection, navigate, lastUpdated }: any) {
+function PublicAlertsPage({ data, detection, lastUpdated }: any) {
   const hasAwas = data.alerts.some((a: any) => String(a.level).toLowerCase() === 'awas');
 
   return (
     <div className="page-section">
       <PageIntro title="Peringatan Aktif" text={`Informasi peringatan untuk masyarakat. Pembaruan terakhir: ${lastUpdated || '-'}`} />
-      {hasAwas && <PublicEmergencyBanner navigate={navigate} />}
       {!hasAwas && data.alerts.length === 0 && (
         <div className="card public-empty-alert">
           <div className="card-title">Status Wilayah</div>
@@ -721,7 +942,7 @@ function PublicMap({ data, compact = false, selectedFacility, selectedRoute, sho
                   <>{data.safeZones.map((z: any) => renderSafeZone(z))}</>
                 </LayersControl.Overlay>
                 <LayersControl.Overlay checked name="Jalur Evakuasi">
-                  <>{data.routes.map((r: any) => renderRoute(r, selectedRoute?.id === r.id))}</>
+                  <>{(selectedRoute ? [selectedRoute] : data.routes).map((r: any) => renderRoute(r, selectedRoute?.id === r.id))}</>
                 </LayersControl.Overlay>
                 <LayersControl.Overlay checked name="Fasilitas">
                   <>{data.facilities.map((f: any) => renderFacility(f, selectedFacility?.id === f.id))}</>
@@ -823,6 +1044,22 @@ function polygonCoords(item: any): [number, number][] {
 
 function routeCoords(item: any): [number, number][] {
   return item.geometry?.coordinates || item.coordinates || [];
+}
+
+function buildGoogleMapsRouteUrl(route: any) {
+  const coords = routeCoords(route);
+  if (!coords.length) return '';
+
+  const start = coords[0];
+  const end = coords[coords.length - 1];
+  if (!start || !end) return '';
+
+  const [startLng, startLat] = start;
+  const [endLng, endLat] = end;
+
+  if (![startLat, startLng, endLat, endLng].every(Number.isFinite)) return '';
+
+  return `https://www.google.com/maps/dir/?api=1&origin=${startLat},${startLng}&destination=${endLat},${endLng}&travelmode=driving`;
 }
 
 function riskColor(level: string) {
