@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import datetime, timezone
 from typing import Optional
 import json
@@ -9,14 +9,6 @@ import asyncpg
 from app.core.config import settings
 
 router = APIRouter()
-
-
-class CustomPointCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=128)
-    description: Optional[str] = None
-    type: str = Field(default="informasi", pattern="^(posko|titik_kumpul|bahaya|informasi|lainnya)$")
-    lng: float = Field(..., ge=-180, le=180)
-    lat: float = Field(..., ge=-90, le=90)
 
 
 class InundationPayload(BaseModel):
@@ -71,58 +63,6 @@ async def _audit(conn: asyncpg.Connection, username: str, action: str, entity_ty
     )
 
 
-async def _ensure_custom_points_table(conn: asyncpg.Connection):
-    await conn.execute(
-        """
-        DO $$
-        BEGIN
-            CREATE TYPE custom_map_point_type AS ENUM ('posko','titik_kumpul','bahaya','informasi','lainnya');
-        EXCEPTION WHEN duplicate_object THEN
-            NULL;
-        END $$;
-
-        CREATE TABLE IF NOT EXISTS custom_map_points (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            name VARCHAR(128) NOT NULL,
-            description TEXT,
-            type custom_map_point_type NOT NULL DEFAULT 'informasi',
-            location geometry(Point, 4326) NOT NULL,
-            created_by VARCHAR(64),
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_custom_map_points_location ON custom_map_points USING GIST(location);
-        CREATE INDEX IF NOT EXISTS idx_custom_map_points_active ON custom_map_points(is_active);
-        """
-    )
-
-
-async def _fetch_custom_points() -> list[dict]:
-    conn = await asyncpg.connect(_asyncpg_dsn())
-    try:
-        await _ensure_custom_points_table(conn)
-        rows = await conn.fetch(
-            """
-            SELECT
-                id::text,
-                name,
-                COALESCE(description, '') AS description,
-                type::text,
-                ST_X(location::geometry) AS lng,
-                ST_Y(location::geometry) AS lat,
-                created_by,
-                created_at
-            FROM custom_map_points
-            WHERE is_active = TRUE
-            ORDER BY created_at DESC
-            """
-        )
-        return [dict(row) for row in rows]
-    finally:
-        await conn.close()
-
 @router.get("/config")
 async def map_config():
     return {
@@ -142,7 +82,6 @@ async def map_layers():
             {"id": "evacuation",     "label": "Jalur Evakuasi",     "default": True},
             {"id": "safe_zones",     "label": "Titik Kumpul",       "default": True},
             {"id": "inundation",     "label": "Zona Genangan",      "default": False},
-            {"id": "custom_points",  "label": "Titik Admin",        "default": True},
             {"id": "heavy_equipment","label": "Alat Berat",         "default": False},
         ]
     }
@@ -272,7 +211,10 @@ async def map_evacuation():
         routes = []
         for row in rows:
             item = dict(row)
-            item["coordinates"] = item.pop("geojson")["coordinates"]
+            geojson = item.pop("geojson")
+            if isinstance(geojson, str):
+                geojson = json.loads(geojson)
+            item["coordinates"] = geojson["coordinates"]
             routes.append(item)
         return {"routes": routes}
     finally:
@@ -300,7 +242,10 @@ async def map_safe_zones():
         zones = []
         for row in rows:
             item = dict(row)
-            item["coordinates"] = item.pop("geojson")["coordinates"][0]
+            geojson = item.pop("geojson")
+            if isinstance(geojson, str):
+                geojson = json.loads(geojson)
+            item["coordinates"] = geojson["coordinates"][0]
             zones.append(item)
         return {"safe_zones": zones}
     finally:
@@ -422,38 +367,3 @@ async def delete_inundation_zone(zone_id: str, authorization: Optional[str] = He
         await conn.close()
 
 
-@router.get("/custom-points")
-async def map_custom_points():
-    return {"points": await _fetch_custom_points()}
-
-
-@router.post("/custom-points", status_code=201)
-async def create_custom_point(req: CustomPointCreate, authorization: Optional[str] = Header(default=None)):
-    user = _require_admin(authorization)
-    conn = await asyncpg.connect(_asyncpg_dsn())
-    try:
-        await _ensure_custom_points_table(conn)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO custom_map_points (name, description, type, location, created_by)
-            VALUES ($1, $2, $3::custom_map_point_type, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6)
-            RETURNING
-                id::text,
-                name,
-                COALESCE(description, '') AS description,
-                type::text,
-                ST_X(location::geometry) AS lng,
-                ST_Y(location::geometry) AS lat,
-                created_by,
-                created_at
-            """,
-            req.name,
-            req.description,
-            req.type,
-            req.lng,
-            req.lat,
-            user["username"],
-        )
-        return {"point": dict(row)}
-    finally:
-        await conn.close()

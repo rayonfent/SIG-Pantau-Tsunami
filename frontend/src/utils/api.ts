@@ -22,9 +22,6 @@ export const mapApi = {
   safeZones:    () => api.get('/map/safe-zones'),
   inundation:   () => api.get('/map/inundation-zones'),
   equipment:    () => api.get('/map/heavy-equipment'),
-  customPoints: () => api.get('/map/custom-points'),
-  createCustomPoint: (payload: { name: string; description?: string; type: string; lng: number; lat: number }) =>
-    api.post('/map/custom-points', payload),
 };
 
 export const simApi = {
@@ -46,7 +43,13 @@ export const dashboardApi = {
 
 export const dataApi = {
   sensors: () => api.get('/sensors/'),
+  createSensor: (payload: any) => api.post('/sensors/', payload),
+  updateSensor: (id: string, payload: any) => api.put(`/sensors/${id}`, payload),
+  deleteSensor: (id: string) => api.delete(`/sensors/${id}`),
   sirens: () => api.get('/sirens/'),
+  createSiren: (payload: any) => api.post('/sirens/', payload),
+  updateSiren: (id: string, payload: any) => api.put(`/sirens/${id}`, payload),
+  deleteSiren: (id: string) => api.delete(`/sirens/${id}`),
   alerts: () => api.get('/alerts/'),
   activeAlerts: () => api.get('/alerts/active'),
   routes: () => api.get('/evacuation/routes'),

@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, dataApi, mapApi } from '../utils/api';
 import { ROUTE_COLORS, FACILITY_COLORS, FACILITY_ICONS, FACILITY_LABELS, EQUIPMENT_ICONS, EQUIPMENT_LABELS } from '../utils/constants';
-import { EvacRoute, Facility, HeavyEquipment, SafeZone, User } from '../types';
+import { EvacRoute, Facility, HeavyEquipment, MapSensor, MapSiren, SafeZone, User } from '../types';
 
 function StateBox({ loading, error, empty, onRefresh }: { loading: boolean; error: string; empty?: boolean; onRefresh?: () => void }) {
   return (
@@ -64,6 +64,23 @@ const routeDistancePreview = (coords: RouteCoordinate[]) => {
   return meters;
 };
 
+const editableRouteWaypoints = (route: EvacRoute | null): RouteCoordinate[] => {
+  const coords = route ? routeCoords(route) : [];
+  if (coords.length <= 25) return coords;
+  return [coords[0], coords[coords.length - 1]].filter(Boolean) as RouteCoordinate[];
+};
+
+const fetchRoadRoute = async (waypoints: RouteCoordinate[]): Promise<RouteCoordinate[]> => {
+  if (waypoints.length < 2) return waypoints;
+  const coordinateText = waypoints.map(([lng, lat]) => `${lng},${lat}`).join(';');
+  const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordinateText}?overview=full&geometries=geojson&continue_straight=false`);
+  if (!response.ok) throw new Error('Router OSRM tidak merespons.');
+  const data = await response.json();
+  const coordinates = data?.routes?.[0]?.geometry?.coordinates;
+  if (!Array.isArray(coordinates) || coordinates.length < 2) throw new Error('Router OSRM tidak menemukan jalur jalan.');
+  return coordinates.map(([lng, lat]: [number, number]) => [Number(lng), Number(lat)] as RouteCoordinate).filter(isValidRouteCoordinate);
+};
+
 function RouteDrawHandler({ onAdd }: { onAdd: (coord: RouteCoordinate) => void }) {
   useMapEvents({
     click(e) {
@@ -99,21 +116,48 @@ function EvacRouteModal({
     status: route?.status || 'clear',
     priority: route?.priority || 1,
   });
+  const initialWaypoints = editableRouteWaypoints(route);
+  const [waypoints, setWaypoints] = useState<RouteCoordinate[]>(initialWaypoints);
   const [coords, setCoords] = useState<RouteCoordinate[]>(route ? routeCoords(route) : []);
+  const [routing, setRouting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const previewMeters = routeDistancePreview(coords);
   const lineColor = routeColor(form.status);
 
-  const addCoord = (coord: RouteCoordinate) => {
+  const rebuildRoadRoute = async (nextWaypoints: RouteCoordinate[]) => {
+    setRouting(true);
+    try {
+      const roadCoords = await fetchRoadRoute(nextWaypoints);
+      setCoords(roadCoords);
+      setNotice('Jalur berhasil mengikuti jaringan jalan besar.');
+      setError('');
+      return roadCoords;
+    } catch (err: any) {
+      setCoords(nextWaypoints);
+      setNotice('Jalur sementara ditampilkan sebagai garis langsung karena router jalan tidak tersedia.');
+      setError(err?.message || 'Gagal membuat jalur mengikuti jalan.');
+      return nextWaypoints;
+    } finally {
+      setRouting(false);
+    }
+  };
+
+  const addCoord = async (coord: RouteCoordinate) => {
     if (!isValidRouteCoordinate(coord)) {
       setError('Titik berada di luar area operasional Bandar Lampung.');
       return;
     }
-    setCoords(prev => [...prev, coord]);
-    setNotice('Titik rute ditambahkan.');
-    setError('');
+    const nextWaypoints = [...waypoints, coord];
+    setWaypoints(nextWaypoints);
+    if (nextWaypoints.length >= 2) {
+      await rebuildRoadRoute(nextWaypoints);
+    } else {
+      setCoords(nextWaypoints);
+      setNotice('Titik awal rute ditambahkan. Tambahkan titik tujuan agar jalur mengikuti jalan.');
+      setError('');
+    }
   };
 
   const validate = () => {
@@ -122,8 +166,8 @@ function EvacRouteModal({
     if (Number(form.capacity_persons) <= 0) return 'Kapasitas wajib lebih besar dari 0.';
     if (!ROUTE_STATUS_OPTIONS.includes(form.status)) return 'Status wajib valid.';
     if (Number(form.priority) < 1 || Number(form.priority) > 5) return 'Prioritas wajib 1 sampai 5.';
-    if (coords.length < 2) return 'Rute wajib memiliki minimal dua titik.';
-    if (!coords.every(isValidRouteCoordinate)) return 'Ada titik rute di luar area operasional Bandar Lampung.';
+    if (waypoints.length < 2) return 'Rute wajib memiliki minimal dua titik.';
+    if (!waypoints.every(isValidRouteCoordinate)) return 'Ada titik rute di luar area operasional Bandar Lampung.';
     return '';
   };
 
@@ -136,6 +180,7 @@ function EvacRouteModal({
     setSaving(true);
     setError('');
     try {
+      const roadCoords = await rebuildRoadRoute(waypoints);
       const estimated = form.estimated_time_min === '' ? null : Number(form.estimated_time_min);
       const payload = {
         name: form.name.trim(),
@@ -145,7 +190,7 @@ function EvacRouteModal({
         estimated_time_min: estimated,
         status: form.status,
         priority: Number(form.priority),
-        coordinates: coords,
+        coordinates: roadCoords,
       };
       if (route) await dataApi.updateRoute(route.id, payload);
       else await dataApi.createRoute(payload);
@@ -183,28 +228,29 @@ function EvacRouteModal({
               <div><label className="text-dim" style={{ fontSize:11 }}>Prioritas *</label><select className="form-input" value={form.priority} onChange={e => setForm(f => ({ ...f, priority:Number(e.target.value) }))}>{[1,2,3,4,5].map(p => <option key={p} value={p}>{p}</option>)}</select></div>
             </div>
             <div className="infobox" style={{ fontSize:11 }}>
-              Jumlah titik: {coords.length}<br />
-              Jarak estimasi: {(previewMeters / 1000).toFixed(2)} km<br />
+              Waypoint admin: {waypoints.length}<br />
+              Titik hasil routing jalan: {coords.length}<br />
+              Jarak estimasi mengikuti jalan: {(previewMeters / 1000).toFixed(2)} km<br />
               Status: {form.status.toUpperCase()}<br />
               Prioritas: {form.priority}
             </div>
             <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-              <button className="btn btn-primary" onClick={save} disabled={saving || coords.length < 2}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
-              <button className="btn btn-outline" onClick={() => setCoords(prev => prev.slice(0, -1))} disabled={saving || coords.length === 0}>Hapus Titik Terakhir</button>
-              <button className="btn btn-outline" onClick={() => setCoords([])} disabled={saving || coords.length === 0}>Reset Rute</button>
-              <button className="btn btn-outline" onClick={onClose} disabled={saving}>Batal</button>
+              <button className="btn btn-primary" onClick={save} disabled={saving || routing || waypoints.length < 2}>{saving ? 'Menyimpan...' : routing ? 'Routing...' : 'Simpan'}</button>
+              <button className="btn btn-outline" onClick={() => { const next = waypoints.slice(0, -1); setWaypoints(next); if (next.length >= 2) rebuildRoadRoute(next); else setCoords(next); }} disabled={saving || routing || waypoints.length === 0}>Hapus Waypoint Terakhir</button>
+              <button className="btn btn-outline" onClick={() => { setWaypoints([]); setCoords([]); setNotice('Rute direset.'); }} disabled={saving || routing || waypoints.length === 0}>Reset Rute</button>
+              <button className="btn btn-outline" onClick={onClose} disabled={saving || routing}>Batal</button>
             </div>
           </div>
           <div>
-            <div className="text-dim" style={{ fontSize:11, marginBottom:8 }}>Klik peta untuk menambah titik rute. Titik pertama adalah awal, titik terakhir adalah akhir.</div>
+            <div className="text-dim" style={{ fontSize:11, marginBottom:8 }}>Klik peta untuk menambah waypoint. Sistem akan membentuk jalur mengikuti jaringan jalan. Pilih titik di jalan utama agar hasil routing mengikuti jalan besar.</div>
             <div style={{ height:420, borderRadius:8, overflow:'hidden', border:'1px solid #e2e8f0' }}>
               <MapContainer center={coords[0] ? toLatLng(coords[0]) : DEFAULT_PANJANG_CENTER} zoom={coords[0] ? 14 : 13} style={{ height:'100%', width:'100%' }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
                 <RouteDrawHandler onAdd={addCoord} />
                 {coords.length >= 2 && <Polyline positions={coords.map(toLatLng)} pathOptions={{ color: lineColor, weight:5, opacity:0.9 }} />}
-                {coords.map((coord, idx) => (
-                  <CircleMarker key={`${coord[0]}-${coord[1]}-${idx}`} center={toLatLng(coord)} radius={idx === 0 || idx === coords.length - 1 ? 8 : 5} pathOptions={{ color: idx === 0 ? '#22c55e' : idx === coords.length - 1 ? '#ef4444' : lineColor, fillColor: lineColor, fillOpacity:0.9, weight:2 }}>
-                    <Popup>{idx === 0 ? 'Titik awal' : idx === coords.length - 1 ? 'Titik akhir' : `Titik ${idx + 1}`}<br />{coord[1].toFixed(6)}, {coord[0].toFixed(6)}</Popup>
+                {waypoints.map((coord, idx) => (
+                  <CircleMarker key={`${coord[0]}-${coord[1]}-${idx}`} center={toLatLng(coord)} radius={idx === 0 || idx === waypoints.length - 1 ? 8 : 5} pathOptions={{ color: idx === 0 ? '#22c55e' : idx === waypoints.length - 1 ? '#ef4444' : '#0f4c81', fillColor:'#ffffff', fillOpacity:1, weight:3 }}>
+                    <Popup>{idx === 0 ? 'Waypoint awal' : idx === waypoints.length - 1 ? 'Waypoint tujuan' : `Waypoint ${idx + 1}`}<br />{coord[1].toFixed(6)}, {coord[0].toFixed(6)}</Popup>
                   </CircleMarker>
                 ))}
               </MapContainer>
@@ -788,19 +834,282 @@ export function Fasilitas({ user }: { user?: User }) {
   );
 }
 
-export function StatusPerangkat({ connected }: any) {
-  const sensors = useLoad<any[]>(async () => (await dataApi.sensors()).data.sensors, []);
-  const sirens = useLoad<any[]>(async () => (await dataApi.sirens()).data.sirens, []);
+const SENSOR_STATUS_OPTIONS = ['online', 'offline', 'suspect', 'maintenance'];
+const SIREN_STATUS_OPTIONS = ['active', 'inactive', 'fault'];
+
+type DeviceKind = 'sensor' | 'siren';
+type DeviceItem = MapSensor | MapSiren;
+
+const deviceLat = (item: { lat?: number; latitude?: number }) => Number(item.lat ?? item.latitude);
+const deviceLng = (item: { lng?: number; longitude?: number }) => Number(item.lng ?? item.longitude);
+
+function DevicePointModal({
+  kind, item, onClose, onSaved,
+}: {
+  kind: DeviceKind;
+  item: DeviceItem | null;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) {
+  const isSensor = kind === 'sensor';
+  const [form, setForm] = useState({
+    code: item?.code || '',
+    name: item?.name || '',
+    lng: item ? deviceLng(item) : DEFAULT_PANJANG_CENTER[1],
+    lat: item ? deviceLat(item) : DEFAULT_PANJANG_CENTER[0],
+    address: (item as any)?.address || '',
+    elevation_m: (item as any)?.elevation_m ?? 0,
+    is_primary: (item as any)?.is_primary ?? true,
+    radius_m: (item as MapSiren | null)?.radius_m ?? 500,
+    status: item?.status || (isSensor ? 'online' : 'inactive'),
+    is_auto_enabled: (item as MapSiren | null)?.is_auto_enabled ?? true,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const setField = (key: string, value: string | number | boolean) => {
+    setForm(prev => ({ ...prev, [key]: value }));
+    setError('');
+  };
+
+  const pickLocation = (lat: number, lng: number) => {
+    setForm(prev => ({ ...prev, lat, lng }));
+    setNotice('Koordinat titik berhasil dipilih/dipindahkan.');
+    setError('');
+  };
+
+  const validate = () => {
+    if (!form.code.trim()) return 'Kode perangkat wajib diisi.';
+    if (!form.name.trim()) return 'Nama perangkat wajib diisi.';
+    if (!Number.isFinite(form.lat) || !Number.isFinite(form.lng)) return 'Koordinat perangkat wajib valid.';
+    if (!isValidPoint({ lat: form.lat, lng: form.lng })) return 'Titik perangkat berada di luar area operasional Bandar Lampung.';
+    if (isSensor && !SENSOR_STATUS_OPTIONS.includes(form.status)) return 'Status sensor tidak valid.';
+    if (!isSensor && !SIREN_STATUS_OPTIONS.includes(form.status)) return 'Status sirine tidak valid.';
+    if (!isSensor && Number(form.radius_m) <= 0) return 'Radius sirine wajib lebih besar dari 0.';
+    return '';
+  };
+
+  const save = async () => {
+    const validation = validate();
+    if (validation) {
+      setError(validation);
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      if (isSensor) {
+        const payload = {
+          code: form.code.trim(),
+          name: form.name.trim(),
+          lng: form.lng,
+          lat: form.lat,
+          address: form.address.trim(),
+          elevation_m: Number(form.elevation_m),
+          is_primary: Boolean(form.is_primary),
+          status: form.status,
+        };
+        if (item) await dataApi.updateSensor(item.id, payload);
+        else await dataApi.createSensor(payload);
+      } else {
+        const payload = {
+          code: form.code.trim(),
+          name: form.name.trim(),
+          lng: form.lng,
+          lat: form.lat,
+          radius_m: Number(form.radius_m),
+          status: form.status,
+          is_auto_enabled: Boolean(form.is_auto_enabled),
+        };
+        if (item) await dataApi.updateSiren(item.id, payload);
+        else await dataApi.createSiren(payload);
+      }
+      onSaved(isSensor ? (item ? 'Sensor berhasil diperbarui.' : 'Sensor berhasil ditambahkan.') : (item ? 'Sirine berhasil diperbarui.' : 'Sirine berhasil ditambahkan.'));
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Gagal menyimpan perangkat.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const markerLabel = isSensor ? 'SNS' : 'SRN';
+  const markerColor = isSensor ? '#06b6d4' : form.status === 'active' ? '#ef4444' : form.status === 'fault' ? '#f97316' : '#64748b';
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(2,8,23,0.78)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+      <div className="card" style={{ width:'min(980px, 96vw)', maxHeight:'92vh', overflow:'auto' }}>
+        <div className="flex justify-between items-center mb-12">
+          <div className="card-title" style={{ margin:0 }}>{item ? 'Edit' : 'Tambah'} {isSensor ? 'Sensor' : 'Sirine'}</div>
+          <button className="btn btn-outline btn-sm" onClick={onClose} disabled={saving}>Batal</button>
+        </div>
+        {notice && <div className="infobox" style={{ borderColor:'#22c55e', color:'#22c55e' }}>{notice}</div>}
+        {error && <div className="infobox" style={{ borderColor:'#ef4444', color:'#ef4444' }}>{error}</div>}
+        <div className="grid-2">
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <label className="text-dim" style={{ fontSize:11 }}>Kode *</label>
+            <input className="form-input" value={form.code} onChange={e => setField('code', e.target.value)} placeholder={isSensor ? 'SNS-001' : 'SRN-001'} />
+            <label className="text-dim" style={{ fontSize:11 }}>Nama *</label>
+            <input className="form-input" value={form.name} onChange={e => setField('name', e.target.value)} />
+            {isSensor ? (
+              <>
+                <label className="text-dim" style={{ fontSize:11 }}>Alamat</label>
+                <input className="form-input" value={form.address} onChange={e => setField('address', e.target.value)} />
+                <div className="grid-2">
+                  <div><label className="text-dim" style={{ fontSize:11 }}>Elevasi (m)</label><input className="form-input" type="number" value={form.elevation_m} onChange={e => setField('elevation_m', Number(e.target.value))} /></div>
+                  <div><label className="text-dim" style={{ fontSize:11 }}>Status *</label><select className="form-input" value={form.status} onChange={e => setField('status', e.target.value)}>{SENSOR_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div>
+                </div>
+                <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#475569' }}><input type="checkbox" checked={form.is_primary} onChange={e => setField('is_primary', e.target.checked)} /> Sensor primer</label>
+              </>
+            ) : (
+              <>
+                <div className="grid-2">
+                  <div><label className="text-dim" style={{ fontSize:11 }}>Radius (m) *</label><input className="form-input" type="number" value={form.radius_m} onChange={e => setField('radius_m', Number(e.target.value))} /></div>
+                  <div><label className="text-dim" style={{ fontSize:11 }}>Status *</label><select className="form-input" value={form.status} onChange={e => setField('status', e.target.value)}>{SIREN_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div>
+                </div>
+                <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#475569' }}><input type="checkbox" checked={form.is_auto_enabled} onChange={e => setField('is_auto_enabled', e.target.checked)} /> Auto sirine aktif</label>
+              </>
+            )}
+            <div className="grid-2">
+              <div><label className="text-dim" style={{ fontSize:11 }}>Latitude *</label><input className="form-input" readOnly value={Number.isFinite(form.lat) ? form.lat.toFixed(6) : ''} /></div>
+              <div><label className="text-dim" style={{ fontSize:11 }}>Longitude *</label><input className="form-input" readOnly value={Number.isFinite(form.lng) ? form.lng.toFixed(6) : ''} /></div>
+            </div>
+            <div className="infobox" style={{ fontSize:11 }}>Klik peta atau drag marker untuk memindahkan titik perangkat ke layer operasional.</div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
+              <button className="btn btn-outline" onClick={onClose} disabled={saving}>Batal</button>
+            </div>
+          </div>
+          <div>
+            <div className="text-dim" style={{ fontSize:11, marginBottom:8 }}>Lokasi akan langsung dipakai oleh layer Sensor/Sirine di Monitoring Peta.</div>
+            <div style={{ height:390, borderRadius:8, overflow:'hidden', border:'1px solid #e2e8f0' }}>
+              <MapContainer center={[form.lat, form.lng]} zoom={14} style={{ height:'100%', width:'100%' }}>
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+                <LocationPicker onPick={pickLocation} />
+                <Marker
+                  position={[form.lat, form.lng]}
+                  icon={markerIcon(markerLabel, markerColor)}
+                  draggable
+                  eventHandlers={{ dragend: (e) => {
+                    const ll = e.target.getLatLng();
+                    pickLocation(ll.lat, ll.lng);
+                  } }}
+                >
+                  <Popup>{form.code || markerLabel}<br />{form.lat.toFixed(6)}, {form.lng.toFixed(6)}</Popup>
+                </Marker>
+              </MapContainer>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function StatusPerangkat({ connected, user }: any) {
+  const sensors = useLoad<MapSensor[]>(async () => (await dataApi.sensors()).data.sensors, []);
+  const sirens = useLoad<MapSiren[]>(async () => (await dataApi.sirens()).data.sirens, []);
   const health = useLoad<any>(async () => (await dataApi.deviceHealth()).data, {});
+  const [modal, setModal] = useState<{ kind: DeviceKind; item: DeviceItem | null } | null>(null);
+  const [message, setMessage] = useState('');
+  const [actionError, setActionError] = useState('');
+  const isAdmin = user?.role === 'admin';
+
+  const refreshAll = async () => {
+    await Promise.all([sensors.load(), sirens.load(), health.load()]);
+  };
+
+  const handleSaved = async (msg: string) => {
+    setModal(null);
+    setMessage(msg);
+    setActionError('');
+    await refreshAll();
+  };
+
+  const deleteDevice = async (kind: DeviceKind, item: DeviceItem) => {
+    if (!isAdmin) {
+      setActionError('Anda tidak memiliki izin untuk mengubah perangkat.');
+      return;
+    }
+    if (!window.confirm(`Hapus ${item.code} - ${item.name}?`)) return;
+    setActionError('');
+    try {
+      if (kind === 'sensor') {
+        await dataApi.deleteSensor(item.id);
+        setMessage('Sensor berhasil dihapus.');
+      } else {
+        await dataApi.deleteSiren(item.id);
+        setMessage('Sirine berhasil dihapus.');
+      }
+      await refreshAll();
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || 'Gagal menghapus perangkat.');
+    }
+  };
+
   return (
     <div className="page-section">
-      <div className="flex justify-between items-center mb-12"><div className="text-dim">Status aktual dari database dan WebSocket.</div><button className="btn btn-outline btn-sm" onClick={() => { sensors.load(); sirens.load(); health.load(); }}>Refresh</button></div>
+      {modal && <DevicePointModal kind={modal.kind} item={modal.item} onClose={() => setModal(null)} onSaved={handleSaved} />}
+        <div className="flex justify-between items-center mb-12">
+          <div className="text-dim">Status aktual dari database dan WebSocket. Admin dapat tambah, edit, dan hapus sensor serta sirine. Koordinat perangkat dikelola melalui form edit.</div>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          {isAdmin && <button className="btn btn-primary btn-sm" onClick={() => setModal({ kind:'sensor', item:null })}>+ Tambah Sensor</button>}
+          {isAdmin && <button className="btn btn-primary btn-sm" onClick={() => setModal({ kind:'siren', item:null })}>+ Tambah Sirine</button>}
+          <button className="btn btn-outline btn-sm" onClick={refreshAll} disabled={sensors.loading || sirens.loading || health.loading}>Refresh</button>
+        </div>
+      </div>
+      {!isAdmin && <div className="infobox">Anda masuk sebagai {user?.role?.toUpperCase() || 'USER'}. Titik sensor dan sirine hanya dapat diubah oleh Admin.</div>}
+      {message && <div className="infobox" style={{ borderColor:'#22c55e', color:'#22c55e' }}>{message}</div>}
+      {actionError && <div className="infobox" style={{ borderColor:'#ef4444', color:'#ef4444' }}>{actionError}</div>}
       <div className="grid-2">
         <div className="card"><div className="card-title">Status Sensor</div><StateBox loading={sensors.loading} error={sensors.error} empty={sensors.data.length === 0} />
-          <table className="data-table"><thead><tr><th>Kode</th><th>Level</th><th>Status</th><th>Quality</th><th>Last Seen</th></tr></thead><tbody>{sensors.data.map(s => <tr key={s.id}><td style={{ fontFamily:'monospace', color:'#1f2937' }}>{s.code}</td><td style={{ color:'#0f4c81', fontFamily:'monospace' }}>{s.water_level_cm ? `${Number(s.water_level_cm).toFixed(1)}cm` : '-'}</td><td>{s.status}</td><td>{s.quality || '-'}</td><td style={{ color:'#64748b', fontSize:10 }}>{s.last_seen ? new Date(s.last_seen).toLocaleString('id-ID') : '-'}</td></tr>)}</tbody></table>
+          <table className="data-table"><thead><tr><th>Kode</th><th>Nama</th><th>Level</th><th>Status</th><th>Quality</th><th>Lokasi</th><th>Last Seen</th><th>Aksi</th></tr></thead><tbody>{sensors.data.map(s => <tr key={s.id}><td style={{ fontFamily:'monospace', color:'#1f2937' }}>{s.code}</td><td>{s.name}</td><td style={{ color:'#0f4c81', fontFamily:'monospace' }}>{s.water_level_cm ? `${Number(s.water_level_cm).toFixed(1)}cm` : '-'}</td><td>{s.status}</td><td>{s.quality || '-'}</td><td style={{ color:isValidPoint(s) ? '#64748b' : '#dc3545', fontSize:10 }}>{coordinateText(s)}</td><td style={{ color:'#64748b', fontSize:10 }}>{s.last_seen ? new Date(s.last_seen).toLocaleString('id-ID') : '-'}</td><td>{isAdmin ? <div style={{ display:'flex', gap:6 }}><button className="btn btn-outline btn-sm" onClick={() => setModal({ kind:'sensor', item:s })}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => deleteDevice('sensor', s)}>Hapus</button></div> : <span className="text-dim">Lihat</span>}</td></tr>)}</tbody></table>
         </div>
         <div className="card"><div className="card-title">Status Sirine</div><StateBox loading={sirens.loading} error={sirens.error} empty={sirens.data.length === 0} />
-          <table className="data-table"><thead><tr><th>Kode</th><th>Nama</th><th>Status</th><th>Auto</th><th>Last Update</th></tr></thead><tbody>{sirens.data.map(s => <tr key={s.id}><td style={{ fontFamily:'monospace', color:'#1f2937' }}>{s.code}</td><td>{s.name}</td><td>{s.status}</td><td>{s.is_auto_enabled ? 'Ya' : 'Tidak'}</td><td style={{ color:'#64748b', fontSize:10 }}>{s.last_activated ? new Date(s.last_activated).toLocaleString('id-ID') : '-'}</td></tr>)}</tbody></table>
+          <table className="data-table"><thead><tr><th>Kode</th><th>Nama</th><th>Status</th><th>Radius</th><th>Auto</th><th>Lokasi</th><th>Last Update</th><th>Aksi</th></tr></thead><tbody>{sirens.data.map(s => <tr key={s.id}><td style={{ fontFamily:'monospace', color:'#1f2937' }}>{s.code}</td><td>{s.name}</td><td>{s.status}</td><td>{Number(s.radius_m || 0).toLocaleString('id-ID')}m</td><td>{s.is_auto_enabled ? 'Ya' : 'Tidak'}</td><td style={{ color:isValidPoint(s) ? '#64748b' : '#dc3545', fontSize:10 }}>{coordinateText(s)}</td><td style={{ color:'#64748b', fontSize:10 }}>{s.last_activated ? new Date(s.last_activated).toLocaleString('id-ID') : '-'}</td><td>{isAdmin ? <div style={{ display:'flex', gap:6 }}><button className="btn btn-outline btn-sm" onClick={() => setModal({ kind:'siren', item:s })}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => deleteDevice('siren', s)}>Hapus</button></div> : <span className="text-dim">Lihat</span>}</td></tr>)}</tbody></table>
+        </div>
+      </div>
+      <div className="card">
+        <div className="flex justify-between items-center mb-12">
+          <div className="card-title" style={{ margin:0 }}>PETA SENSOR & SIRINE</div>
+          <div className="text-dim" style={{ fontSize:11 }}>Menampilkan hanya perangkat sensor dan sirine yang memiliki koordinat valid.</div>
+        </div>
+        {(sensors.loading || sirens.loading) && <div className="infobox">Memuat marker sensor dan sirine...</div>}
+        {(sensors.error || sirens.error) && <div className="infobox" style={{ borderColor:'#ef4444', color:'#ef4444' }}>Gagal memuat sebagian marker perangkat.</div>}
+        {!sensors.loading && !sirens.loading && sensors.data.length === 0 && sirens.data.length === 0 && <div className="text-dim" style={{ padding:12 }}>Belum ada data sensor atau sirine.</div>}
+        <div style={{ height: 460, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+          <MapContainer center={DEFAULT_PANJANG_CENTER} zoom={14} style={{ height:'100%', width:'100%', background:'#0a1628' }}>
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+            <FacilitiesFitBounds facilities={sensors.data.filter(isValidPoint) as any} equipment={sirens.data.filter(isValidPoint) as any} />
+            {sensors.data.filter(isValidPoint).map(sensor => (
+              <Marker key={sensor.id} position={[deviceLat(sensor), deviceLng(sensor)]} icon={markerIcon('SNS', '#06b6d4')}>
+                <Popup>
+                  <b>📡 {sensor.name}</b><br />
+                  Kode: {sensor.code}<br />
+                  Status: {sensor.status}<br />
+                  Level air: {sensor.water_level_cm ? `${Number(sensor.water_level_cm).toFixed(1)} cm` : '-'}<br />
+                  Quality: {sensor.quality || '-'}<br />
+                  Latitude: {deviceLat(sensor).toFixed(6)}<br />
+                  Longitude: {deviceLng(sensor).toFixed(6)}<br />
+                  {isAdmin && <button className="btn btn-outline btn-sm" onClick={() => setModal({ kind:'sensor', item:sensor })}>Edit</button>}
+                </Popup>
+              </Marker>
+            ))}
+            {sirens.data.filter(isValidPoint).map(siren => (
+              <Marker key={siren.id} position={[deviceLat(siren), deviceLng(siren)]} icon={markerIcon('SRN', siren.status === 'active' ? '#ef4444' : siren.status === 'fault' ? '#f97316' : '#64748b')}>
+                <Popup>
+                  <b>📢 {siren.name}</b><br />
+                  Kode: {siren.code}<br />
+                  Status: {siren.status}<br />
+                  Radius: {Number(siren.radius_m || 0).toLocaleString('id-ID')} m<br />
+                  Auto: {siren.is_auto_enabled ? 'Ya' : 'Tidak'}<br />
+                  Latitude: {deviceLat(siren).toFixed(6)}<br />
+                  Longitude: {deviceLng(siren).toFixed(6)}<br />
+                  {isAdmin && <button className="btn btn-outline btn-sm" onClick={() => setModal({ kind:'siren', item:siren })}>Edit</button>}
+                </Popup>
+              </Marker>
+            ))}
+          </MapContainer>
         </div>
       </div>
       <div className="grid-3">
