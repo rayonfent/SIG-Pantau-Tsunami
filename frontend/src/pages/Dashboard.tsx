@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { SensorData, DetectionState, AlertEvent, SirenEvent, User } from '../types';
 import { LEVEL_COLORS, LEVEL_LABEL, formatTime } from '../utils/constants';
+import { dashboardApi } from '../utils/api';
 
 interface Props {
   sensors: Record<string, SensorData>;
@@ -17,24 +18,64 @@ interface Props {
 const SENSOR_COLORS = ['#06b6d4', '#22c55e', '#f97316', '#a855f7'];
 
 export default function Dashboard({ sensors, detection, alertHistory, sirenHistory, connected }: Props) {
+  const [summary, setSummary] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const sensorList = Object.values(sensors);
   const levelColor = LEVEL_COLORS[detection.level];
   const levelLabel = LEVEL_LABEL[detection.level];
 
-  // Build simple chart data from last 20 alerts (level changes)
+  const loadSummary = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await dashboardApi.summary();
+      setSummary(res.data);
+    } catch {
+      setError('Gagal memuat ringkasan dashboard dari backend.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadSummary(); }, []);
+
+  const dbReadings = summary?.readings || [];
+  const displaySensors = sensorList.length ? sensorList : dbReadings.map((r: any) => ({
+    sensor_id: r.code,
+    code: r.code,
+    name: r.name,
+    water_level_cm: r.water_level_cm,
+    delta_1m: 0,
+    delta_3m: r.delta_3m,
+    delta_5m: 0,
+    rate_cm_per_min: r.rate_cm_per_min,
+    z_score: r.z_score,
+    quality: r.quality,
+    baseline_median: r.water_level_cm,
+    timestamp: r.timestamp,
+  }));
+  const onlineSensors = sensorList.length ? sensorList.filter(s => s.quality !== 'offline').length : (summary?.sensors_online ?? 0);
+
   const chartData = useMemo(() => {
-    return sensorList.map((s, i) => ({
+    return displaySensors.map((s: any) => ({
       name: s.code,
       level: s.water_level_cm,
       baseline: s.baseline_median,
       delta: s.delta_3m,
     }));
-  }, [sensorList]);
-
-  const onlineSensors = sensorList.filter(s => s.quality !== 'offline').length;
+  }, [displaySensors]);
 
   return (
     <div className="page-section">
+      {loading && <div className="infobox">Memuat ringkasan dashboard...</div>}
+      {error && <div className="infobox" style={{ borderColor: '#ef4444', color: '#ef4444' }}>{error}</div>}
+      <div className="flex justify-between items-center mb-12">
+        <div className="text-dim" style={{ fontSize: 12 }}>
+          Last update: {summary?.last_updated ? new Date(summary.last_updated).toLocaleString('id-ID') : '-'} · Backend: {summary?.backend_status || '-'} · Database: {summary?.database_status || '-'} · WS: {connected ? 'online' : 'reconnecting'}
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={loadSummary} disabled={loading}>Refresh</button>
+      </div>
       {/* Stat row */}
       <div className="grid-4">
         <div className="stat-box" style={{ borderTop: `3px solid ${levelColor}` }}>
@@ -47,19 +88,19 @@ export default function Dashboard({ sensors, detection, alertHistory, sirenHisto
         <div className="stat-box">
           <div className="stat-label">SENSOR ONLINE</div>
           <div className="stat-value text-ok">{onlineSensors}</div>
-          <div className="stat-sub">dari {sensorList.length} sensor</div>
+          <div className="stat-sub">offline {summary?.sensors_offline ?? 0} dari {summary?.sensors_total ?? displaySensors.length} sensor</div>
         </div>
         <div className="stat-box">
           <div className="stat-label">SIRINE</div>
-          <div className="stat-value" style={{ color: detection.siren_active ? '#ef4444' : '#22c55e', fontSize: 20 }}>
-            {detection.siren_active ? '🔊 AKTIF' : '🔇 TIDAK AKTIF'}
+          <div className="stat-value" style={{ color: (detection.siren_active || (summary?.sirens_active ?? 0) > 0) ? '#ef4444' : '#22c55e', fontSize: 20 }}>
+            {(detection.siren_active || (summary?.sirens_active ?? 0) > 0) ? '🔊 AKTIF' : '🔇 TIDAK AKTIF'}
           </div>
-          <div className="stat-sub">3 unit terpasang</div>
+          <div className="stat-sub">{summary?.sirens_active ?? 0} aktif · {summary?.sirens_inactive ?? 0} tidak aktif</div>
         </div>
         <div className="stat-box">
           <div className="stat-label">ALERT HARI INI</div>
-          <div className="stat-value">{alertHistory.length}</div>
-          <div className="stat-sub">event terdeteksi</div>
+          <div className="stat-value">{summary?.alerts_today ?? alertHistory.length}</div>
+          <div className="stat-sub">{summary?.alerts_active ?? 0} alert aktif</div>
         </div>
       </div>
 
@@ -68,13 +109,13 @@ export default function Dashboard({ sensors, detection, alertHistory, sirenHisto
         {/* Sensor readings */}
         <div className="card">
           <div className="card-title">📡 Pembacaan Sensor Real-time</div>
-          {sensorList.length === 0 ? (
+          {displaySensors.length === 0 ? (
             <div className="text-dim" style={{ fontSize: 12, padding: 20, textAlign: 'center' }}>
               Menunggu data sensor... {connected ? '(terhubung)' : '(reconnecting)'}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {sensorList.map((s, i) => {
+              {displaySensors.map((s: any, i: number) => {
                 const d3 = s.delta_3m || 0;
                 const isUp = d3 > 0;
                 const absD3 = Math.abs(d3);

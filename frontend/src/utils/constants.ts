@@ -29,6 +29,10 @@ export const FACILITY_COLORS: Record<string, string> = {
   medis:   '#43A047',
   damkar:  '#E53935',
   sar:     '#FDD835',
+  posko_evakuasi: '#06b6d4',
+  sekolah: '#a855f7',
+  tempat_ibadah: '#14b8a6',
+  fasilitas_umum: '#f97316',
   lainnya: '#757575',
 };
 
@@ -37,12 +41,50 @@ export const FACILITY_ICONS: Record<string, string> = {
   medis:   '🏥',
   damkar:  '🚒',
   sar:     '🛟',
-  lainnya: '🏢',
+  posko_evakuasi: '⛺',
+  sekolah: '🏫',
+  tempat_ibadah: '🕌',
+  fasilitas_umum: '📍',
+  lainnya: '📌',
+};
+
+export const FACILITY_LABELS: Record<string, string> = {
+  medis: 'Medis',
+  polisi: 'Polisi',
+  damkar: 'Pemadam Kebakaran',
+  sar: 'SAR',
+  posko_evakuasi: 'Posko Evakuasi',
+  sekolah: 'Sekolah',
+  tempat_ibadah: 'Tempat Ibadah',
+  fasilitas_umum: 'Fasilitas Umum',
+  lainnya: 'Lainnya',
+};
+
+export const EQUIPMENT_ICONS: Record<string, string> = {
+  ambulance: '🚑',
+  excavator: '🚜',
+  truk_evakuasi: '🚚',
+  mobil_sar: '🚙',
+  perahu_karet: '🛶',
+  alat_berat_lainnya: '🏗️',
+  lainnya: '📦',
+};
+
+export const EQUIPMENT_LABELS: Record<string, string> = {
+  ambulance: 'Ambulance',
+  excavator: 'Excavator',
+  truk_evakuasi: 'Truk Evakuasi',
+  mobil_sar: 'Mobil SAR',
+  perahu_karet: 'Perahu Karet',
+  alat_berat_lainnya: 'Alat Berat Lainnya',
+  lainnya: 'Lainnya',
 };
 
 export const ROUTE_COLORS: Record<string, string> = {
   clear:     '#22c55e',
+  warning:   '#f97316',
   congested: '#f97316',
+  maintenance: '#94a3b8',
   blocked:   '#ef4444',
 };
 

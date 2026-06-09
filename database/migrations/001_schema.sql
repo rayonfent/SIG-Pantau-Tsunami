@@ -166,7 +166,17 @@ CREATE TABLE siren_events (
 -- ============================================================
 -- FACILITIES & ASSETS
 -- ============================================================
-CREATE TYPE facility_type AS ENUM ('polisi','medis','damkar','sar','lainnya');
+CREATE TYPE facility_type AS ENUM (
+    'medis',
+    'polisi',
+    'damkar',
+    'sar',
+    'posko_evakuasi',
+    'sekolah',
+    'tempat_ibadah',
+    'fasilitas_umum',
+    'lainnya'
+);
 
 CREATE TABLE facilities (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -178,7 +188,8 @@ CREATE TABLE facilities (
     capacity INTEGER,
     is_active BOOLEAN DEFAULT TRUE,
     notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_facilities_location ON facilities USING GIST(location);
 
@@ -189,14 +200,15 @@ CREATE TABLE heavy_equipment (
     location geometry(Point, 4326) NOT NULL,
     status VARCHAR(32) DEFAULT 'available',
     notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_heavy_eq_location ON heavy_equipment USING GIST(location);
 
 -- ============================================================
 -- EVACUATION
 -- ============================================================
-CREATE TYPE route_status AS ENUM ('clear','congested','blocked');
+CREATE TYPE route_status AS ENUM ('clear','congested','warning','blocked','maintenance');
 
 CREATE TABLE evacuation_routes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -209,7 +221,8 @@ CREATE TABLE evacuation_routes (
     status route_status DEFAULT 'clear',
     priority INTEGER DEFAULT 1,
     notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_evac_routes ON evacuation_routes USING GIST(route);
 

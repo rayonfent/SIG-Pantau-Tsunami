@@ -7,10 +7,12 @@ import asyncio
 import math
 import random
 import logging
+import asyncpg
 from datetime import datetime, timezone
 from collections import deque
 from typing import Dict, Deque
 
+from app.core.config import settings
 from app.websocket.manager import manager
 from app.services.detection_engine import (
     SensorReading, ThresholdConfig, detect_multi_sensor,
@@ -50,10 +52,211 @@ siren_active = False
 siren_last_activated = None
 
 
+def _dsn() -> str:
+    return settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+
+
+async def _persist_readings(sensor_updates: list[dict], readings: list[SensorReading]):
+    conn = await asyncpg.connect(_dsn())
+    try:
+        async with conn.transaction():
+            for update, reading in zip(sensor_updates, readings):
+                await conn.execute(
+                    """
+                    UPDATE sensors
+                    SET status = $2::sensor_status,
+                        last_seen = CASE WHEN $2 = 'offline' THEN last_seen ELSE NOW() END
+                    WHERE id = $1::uuid
+                    """,
+                    reading.sensor_id,
+                    "offline" if reading.quality == "offline" else "online",
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO sensor_readings (
+                        sensor_id, water_level_cm, raw_value, quality, delta_1m, delta_3m, delta_5m,
+                        rate_cm_per_min, z_score, smoothed_level, baseline_median
+                    )
+                    VALUES ($1::uuid, $2, $3, $4::quality_flag, $5, $6, $7, $8, $9, $10, $11)
+                    """,
+                    reading.sensor_id,
+                    reading.water_level_cm,
+                    reading.water_level_cm,
+                    reading.quality,
+                    reading.delta_1m,
+                    reading.delta_3m,
+                    reading.delta_5m,
+                    reading.rate_cm_per_min,
+                    reading.z_score,
+                    reading.smoothed_level,
+                    reading.baseline_median,
+                )
+    finally:
+        await conn.close()
+
+
+async def _persist_alert(result, readings: list[SensorReading]) -> str | None:
+    if result.level == "normal":
+        return None
+
+    conn = await asyncpg.connect(_dsn())
+    try:
+        async with conn.transaction():
+            alert_id = await conn.fetchval(
+                """
+                INSERT INTO alerts (
+                    level, status, confidence_score, max_delta_cm, max_rate, max_zscore, sensor_count
+                )
+                VALUES ($1::alert_level, 'active', $2, $3, $4, $5, $6)
+                RETURNING id::text
+                """,
+                result.level,
+                result.confidence_score,
+                result.max_delta_cm,
+                result.max_rate,
+                result.max_zscore,
+                result.sensor_count,
+            )
+            for reading in readings:
+                if reading.quality in ("bad", "offline"):
+                    continue
+                reading_id = await conn.fetchval(
+                    """
+                    SELECT id
+                    FROM sensor_readings
+                    WHERE sensor_id = $1::uuid
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                    """,
+                    reading.sensor_id,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO alert_sensor_evidence (alert_id, sensor_id, reading_id, delta_3m, rate, z_score)
+                    VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
+                    """,
+                    alert_id,
+                    reading.sensor_id,
+                    reading_id,
+                    reading.delta_3m,
+                    reading.rate_cm_per_min,
+                    reading.z_score,
+                )
+            await conn.execute(
+                """
+                INSERT INTO system_events (event_type, severity, message, detail)
+                VALUES ('ALERT_CREATED', $1, $2, $3::jsonb)
+                """,
+                "critical" if result.level == "awas" else "warning",
+                f"Alert {result.level.upper()} dibuat oleh detection engine",
+                f'{{"alert_id":"{alert_id}","confidence":{result.confidence_score}}}',
+            )
+            await conn.execute(
+                """
+                INSERT INTO audit_logs (username, action, entity_type, entity_id, reason)
+                VALUES ('system', 'ALERT_CREATED', 'alerts', $1, $2)
+                """,
+                alert_id,
+                "; ".join(result.triggered_by) or f"Level {result.level}",
+            )
+            return alert_id
+    finally:
+        await conn.close()
+
+
+async def _persist_auto_siren(alert_id: str | None, siren_ids: list[str]):
+    conn = await asyncpg.connect(_dsn())
+    try:
+        async with conn.transaction():
+            await conn.execute("UPDATE sirens SET status = 'active', last_activated = NOW() WHERE is_auto_enabled = TRUE")
+            for sid in siren_ids:
+                await conn.execute(
+                    """
+                    INSERT INTO siren_events (siren_id, alert_id, event_type, reason, success)
+                    VALUES ($1::uuid, $2::uuid, 'auto_on', 'Level AWAS terdeteksi - otomasi sirine', TRUE)
+                    """,
+                    sid,
+                    alert_id,
+                )
+            await conn.execute(
+                """
+                INSERT INTO audit_logs (username, action, entity_type, entity_id, reason)
+                VALUES ('system', 'SIREN_ACTIVATED', 'sirens', $1, 'Level AWAS terdeteksi')
+                """,
+                ",".join(siren_ids),
+            )
+    finally:
+        await conn.close()
+
+
+async def _persist_auto_siren_off():
+    conn = await asyncpg.connect(_dsn())
+    try:
+        async with conn.transaction():
+            rows = await conn.fetch("UPDATE sirens SET status = 'inactive' WHERE status = 'active' RETURNING id::text")
+            for row in rows:
+                await conn.execute(
+                    """
+                    INSERT INTO siren_events (siren_id, event_type, reason, success)
+                    VALUES ($1::uuid, 'normal_off', 'Kondisi normal stabil >= 10 menit', TRUE)
+                    """,
+                    row["id"],
+                )
+            await conn.execute(
+                """
+                INSERT INTO audit_logs (username, action, entity_type, reason)
+                VALUES ('system', 'SIREN_DEACTIVATED', 'sirens', 'Kondisi normal stabil >= 10 menit')
+                """
+            )
+    finally:
+        await conn.close()
+
+
+async def _persist_normal_state():
+    conn = await asyncpg.connect(_dsn())
+    try:
+        async with conn.transaction():
+            resolved = await conn.fetch(
+                """
+                UPDATE alerts
+                SET status = 'resolved',
+                    resolved_at = COALESCE(resolved_at, NOW()),
+                    resolution_note = COALESCE(resolution_note, 'Kondisi kembali normal')
+                WHERE status IN ('active','confirmed')
+                RETURNING id::text
+                """
+            )
+            active_sirens = await conn.fetch("UPDATE sirens SET status = 'inactive' WHERE status = 'active' RETURNING id::text")
+            if resolved:
+                await conn.execute(
+                    """
+                    INSERT INTO audit_logs (username, action, entity_type, reason)
+                    VALUES ('system', 'ALERT_RESOLVED', 'alerts', 'Kondisi kembali normal')
+                    """
+                )
+            for row in active_sirens:
+                await conn.execute(
+                    """
+                    INSERT INTO siren_events (siren_id, event_type, reason, success)
+                    VALUES ($1::uuid, 'normal_off', 'Kondisi kembali normal', TRUE)
+                    """,
+                    row["id"],
+                )
+            if active_sirens:
+                await conn.execute(
+                    """
+                    INSERT INTO audit_logs (username, action, entity_type, reason)
+                    VALUES ('system', 'SIREN_DEACTIVATED', 'sirens', 'Kondisi kembali normal')
+                    """
+                )
+    finally:
+        await conn.close()
+
+
 def get_noisy_level(base: float, tick: int) -> float:
     """Tidal + noise simulation."""
-    tidal = math.sin(tick * 0.02) * 8
-    noise = random.gauss(0, 1.5)
+    tidal = math.sin(tick * 0.01) * 2
+    noise = random.gauss(0, 0.25)
     return base + tidal + noise
 
 
@@ -144,11 +347,14 @@ async def stream_sensors():
                 })
 
             # Run detection
+            await _persist_readings(sensor_updates, readings)
             result = detect_multi_sensor(readings, DEFAULT_CFG)
 
             # Check for level change
             if result.level != current_alert_level:
+                alert_id = await _persist_alert(result, readings)
                 alert_payload = {
+                    "id": alert_id,
                     "level": result.level,
                     "previous_level": current_alert_level,
                     "confidence_score": result.confidence_score,
@@ -167,23 +373,28 @@ async def stream_sensors():
                 if result.level == "awas" and not siren_active:
                     siren_active = True
                     siren_last_activated = datetime.now(timezone.utc)
+                    siren_ids = ["bbbb0001-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                                 "bbbb0002-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                                 "bbbb0003-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
+                    await _persist_auto_siren(alert_id, siren_ids)
                     await manager.broadcast_siren({
                         "action": "auto_on",
                         "reason": "Level AWAS terdeteksi - otomasi sirine",
                         "timestamp": siren_last_activated.isoformat(),
-                        "siren_ids": ["bbbb0001-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-                                      "bbbb0002-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-                                      "bbbb0003-bbbb-bbbb-bbbb-bbbbbbbbbbbb"],
+                        "siren_ids": siren_ids,
                     })
 
                 alert_stable_counter = 0
                 current_alert_level = result.level
             else:
                 alert_stable_counter += 1
+                if result.level == "normal" and alert_stable_counter == 1:
+                    await _persist_normal_state()
 
             # Auto siren off if normal stable 60 ticks (10 min)
             if siren_active and result.level == "normal" and alert_stable_counter >= 60:
                 siren_active = False
+                await _persist_auto_siren_off()
                 await manager.broadcast_siren({
                     "action": "auto_off",
                     "reason": "Kondisi normal stabil >= 10 menit",
@@ -214,9 +425,10 @@ async def stream_sensors():
 def get_simulation_state():
     return {**simulation_state, "siren_active": siren_active, "current_level": current_alert_level}
 
-def set_simulation_mode(mode: str, scenario: str = "normal", water_override: float = 0.0):
+def set_simulation_mode(mode: str, scenario: str = "normal", water_override: float = 0.0, session_id: str | None = None):
     simulation_state["mode"] = mode
     simulation_state["scenario"] = scenario
     simulation_state["water_override"] = water_override
+    simulation_state["session_id"] = session_id if mode == "simulation" else None
     if mode == "simulation":
         simulation_state["tick"] = 0

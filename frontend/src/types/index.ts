@@ -1,7 +1,7 @@
 export type AlertLevel = 'normal' | 'suspect' | 'waspada' | 'siaga' | 'awas';
 export type SensorStatus = 'online' | 'offline' | 'suspect' | 'maintenance';
 export type SirenStatus = 'active' | 'inactive' | 'fault';
-export type RouteStatus = 'clear' | 'congested' | 'blocked';
+export type RouteStatus = 'clear' | 'congested' | 'warning' | 'blocked' | 'maintenance';
 export type UserRole = 'operator' | 'supervisor' | 'admin';
 
 export interface SensorData {
@@ -57,27 +57,67 @@ export interface User {
 export interface MapSensor {
   id: string; code: string; name: string;
   lng: number; lat: number; status: string; water_level_cm: number;
+  delta_3m?: number; quality?: string; last_seen?: string;
 }
 export interface MapSiren {
   id: string; code: string; name: string;
   lng: number; lat: number; radius_m: number; status: string;
+  is_auto_enabled?: boolean; last_activated?: string;
 }
 export interface MapFacility {
   id: string; name: string; type: string;
-  lng: number; lat: number; phone: string;
+  lng: number; lat: number; phone: string; address?: string; capacity?: number; notes?: string; description?: string;
+}
+
+export interface Facility {
+  id: string;
+  name: string;
+  type: string;
+  address?: string;
+  phone?: string;
+  description?: string;
+  notes?: string;
+  latitude: number;
+  longitude: number;
+  lat?: number;
+  lng?: number;
+  location_status?: string;
 }
 export interface EvacRoute {
   id: string; name: string; status: RouteStatus;
   coordinates: [number, number][]; distance_m: number; estimated_time_min: number;
+  direction?: string; description?: string; notes?: string; capacity_persons?: number; priority?: number;
+  geometry?: { type: 'LineString'; coordinates: [number, number][] };
 }
 export interface SafeZone {
   id: string; name: string; elevation_m: number;
   capacity: number; current_count: number;
   coordinates: [number, number][];
+  facilities?: string[];
+  geometry?: { type: 'Polygon'; coordinates: [number, number][][] };
 }
 export interface InundationZone {
   id: string; name: string; risk_level: string;
   coordinates: [number, number][];
+}
+
+export interface MapEquipment {
+  id: string; name: string; type: string; status: string;
+  lng: number; lat: number; notes?: string; description?: string;
+}
+
+export interface HeavyEquipment {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  description?: string;
+  latitude: number;
+  longitude: number;
+  lat?: number;
+  lng?: number;
+  notes?: string;
+  location_status?: string;
 }
 
 export interface CustomMapPoint {

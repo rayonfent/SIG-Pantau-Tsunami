@@ -50,6 +50,7 @@ export default function App() {
   const [currentAlert, setCurrentAlert] = useState<AlertEvent | null>(null);
   const [sirenActive, setSirenActive] = useState(false);
   const [mode, setMode] = useState<'live' | 'simulation'>('live');
+  const [authMessage, setAuthMessage] = useState('');
   const { connected } = useWebSocket(useCallback((msg) => {
     if (msg.event === 'sensor_update') {
       const d = msg.data;
@@ -81,7 +82,27 @@ export default function App() {
     const { access_token, role, full_name } = res.data;
     localStorage.setItem('token', access_token);
     setUser({ username, role, full_name });
+    setAuthMessage(`Login berhasil sebagai ${role}`);
   };
+
+  const handleLogout = async () => {
+    try { await authApi.logout(); } catch {}
+    localStorage.removeItem('token');
+    setUser(null);
+    setActivePage('dashboard');
+    setAuthMessage('');
+  };
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    authApi.me()
+      .then(res => {
+        const { username, role, full_name } = res.data;
+        setUser({ username, role, full_name });
+      })
+      .catch(() => localStorage.removeItem('token'));
+  }, []);
 
   const handleDismissWarning = () => {
     if (user?.role === 'supervisor' || user?.role === 'admin') {
@@ -171,6 +192,7 @@ export default function App() {
                 <div className="user-role">{user.role.toUpperCase()}</div>
               </div>
             </div>
+            {authMessage && <div className="infobox" style={{ fontSize: 10, padding: 8 }}>{authMessage}</div>}
             <div className="ws-status">
               <span className={`ws-dot ${connected ? 'connected' : 'disconnected'}`} />
               <span>{connected ? 'Terhubung' : 'Reconnecting...'}</span>
@@ -178,6 +200,9 @@ export default function App() {
             {mode === 'simulation' && (
               <div className="sim-badge">🎮 MODE SIMULASI</div>
             )}
+            <button className="btn btn-outline btn-sm" style={{ width: '100%', marginTop: 8 }} onClick={handleLogout}>
+              Logout
+            </button>
           </div>
         )}
       </aside>

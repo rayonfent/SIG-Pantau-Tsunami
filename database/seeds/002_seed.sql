@@ -6,13 +6,13 @@
 -- Users
 INSERT INTO users (id, username, full_name, email, hashed_password, role, pin_hash) VALUES
   ('11111111-1111-1111-1111-111111111111', 'admin', 'Administrator Sistem', 'admin@sigtsu.id',
-   '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TiGNPO0DpMHNW1CMUL8YBnU0E3Vy', -- password: admin123
-   'admin', '$2b$12$pin_hash_placeholder'),
+   '$2b$12$HjfakxrqmS5luFdZM./NOOD4E5LtFq0VXfybnGHPHWl5pvD8ppB62', -- password: admin123
+   'admin', '$2b$12$In0KHBQbMVram0wKEipGSOocWpSvMxl8CmW3UaIVfUFfqgidcsRSq'), -- pin: 123456
   ('22222222-2222-2222-2222-222222222222', 'supervisor1', 'Budi Santoso', 'budi@sigtsu.id',
-   '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TiGNPO0DpMHNW1CMUL8YBnU0E3Vy',
+   '$2b$12$2HO/nY7p/nsFbY8J1vDWm.o9KqD2oyeZ882zFoHnMmG9fxMeeeMbe', -- password: super123
    'supervisor', NULL),
   ('33333333-3333-3333-3333-333333333333', 'operator1', 'Siti Rahayu', 'siti@sigtsu.id',
-   '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TiGNPO0DpMHNW1CMUL8YBnU0E3Vy',
+   '$2b$12$Vw3EyldCX0vfnZCqmY0FC.cw9soQspc.Qx2DnJv5L7tu.zb5/0unm', -- password: oper123
    'operator', NULL);
 
 -- Sensors (Area Panjang, Lampung - pesisir Teluk Lampung)
@@ -48,44 +48,11 @@ INSERT INTO sirens (id, code, name, location, radius_m, status, is_auto_enabled)
   ('bbbb0003-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'SRN-PLG-03', 'Sirine Gudang Pusri',
    ST_SetSRID(ST_MakePoint(105.2650, -5.4790), 4326), 700, 'inactive', TRUE);
 
--- Facilities
-INSERT INTO facilities (name, type, location, address, phone) VALUES
-  ('Polsek Panjang', 'polisi',
-   ST_SetSRID(ST_MakePoint(105.2756, -5.4698), 4326),
-   'Jl. Yos Sudarso, Panjang', '(0721) 35001'),
-  ('Puskesmas Panjang', 'medis',
-   ST_SetSRID(ST_MakePoint(105.2820, -5.4672), 4326),
-   'Jl. Panjang Raya, Bandar Lampung', '(0721) 35678'),
-  ('RS Urip Sumoharjo', 'medis',
-   ST_SetSRID(ST_MakePoint(105.2940, -5.4610), 4326),
-   'Jl. Urip Sumoharjo No.200', '(0721) 772200'),
-  ('Pos Damkar Panjang', 'damkar',
-   ST_SetSRID(ST_MakePoint(105.2795, -5.4705), 4326),
-   'Jl. Yos Sudarso Km.7', '(0721) 112'),
-  ('Pos SAR Teluk Lampung', 'sar',
-   ST_SetSRID(ST_MakePoint(105.2700, -5.4730), 4326),
-   'Pelabuhan Panjang Dalam', '(0721) 115');
+-- Facilities and heavy equipment are intentionally not seeded.
+-- Verified locations must be entered manually by Admin through the application.
 
--- Heavy Equipment
-INSERT INTO heavy_equipment (name, type, location, status) VALUES
-  ('Excavator CAT 320', 'Excavator',
-   ST_SetSRID(ST_MakePoint(105.2760, -5.4715), 4326), 'available'),
-  ('Truk Evakuasi 01', 'Truk',
-   ST_SetSRID(ST_MakePoint(105.2800, -5.4680), 4326), 'available'),
-  ('Ambulance SAR', 'Ambulance',
-   ST_SetSRID(ST_MakePoint(105.2700, -5.4730), 4326), 'available');
-
--- Evacuation Routes (LineString menuju zona aman di darat)
-INSERT INTO evacuation_routes (name, route, direction, capacity_persons, distance_m, estimated_time_min, status, priority) VALUES
-  ('Jalur A - Panjang ke Tanjung Karang',
-   ST_SetSRID(ST_GeomFromText('LINESTRING(105.2733 -5.4712, 105.2780 -5.4680, 105.2850 -5.4620, 105.2950 -5.4540, 105.3050 -5.4460)'), 4326),
-   'Ke arah Tanjung Karang (barat laut)', 1000, 4800, 20, 'clear', 1),
-  ('Jalur B - Panjang ke Sukabumi',
-   ST_SetSRID(ST_GeomFromText('LINESTRING(105.2890 -5.4580, 105.2920 -5.4510, 105.2960 -5.4440, 105.3000 -5.4380)'), 4326),
-   'Ke arah Sukabumi (utara)', 800, 3600, 15, 'clear', 2),
-  ('Jalur C - Alternatif Timur',
-   ST_SetSRID(ST_GeomFromText('LINESTRING(105.2980 -5.4640, 105.3010 -5.4580, 105.3050 -5.4510)'), 4326),
-   'Ke arah dataran tinggi timur', 600, 2800, 12, 'clear', 3);
+-- Evacuation routes are intentionally not seeded.
+-- Verified evacuation routes must be drawn manually by Admin through the application.
 
 -- Safe Zones (Polygon zona aman di dataran tinggi)
 INSERT INTO safe_zones (name, zone, elevation_m, capacity, facilities) VALUES

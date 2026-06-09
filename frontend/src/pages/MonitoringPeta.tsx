@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, Polyline, Polygon, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, Polyline, Polygon, Marker, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { mapApi } from '../utils/api';
-import { FACILITY_COLORS, FACILITY_ICONS, ROUTE_COLORS, LEVEL_COLORS } from '../utils/constants';
-import { SensorData, DetectionState, MapSensor, MapSiren, MapFacility, EvacRoute, SafeZone, InundationZone, CustomMapPoint, User } from '../types';
+import { FACILITY_COLORS, FACILITY_ICONS, FACILITY_LABELS, EQUIPMENT_ICONS, EQUIPMENT_LABELS, ROUTE_COLORS, LEVEL_COLORS } from '../utils/constants';
+import { SensorData, DetectionState, MapSensor, MapSiren, MapFacility, EvacRoute, SafeZone, InundationZone, CustomMapPoint, MapEquipment, User } from '../types';
 
 interface Props {
   sensors: Record<string, SensorData>;
@@ -21,7 +22,7 @@ interface DraftPoint {
 const LAYER_DEFAULTS = {
   sensors: true, sirens: true, facilities: true,
   evacuation: true, safe_zones: true, inundation: false,
-  custom_points: true,
+  custom_points: true, heavy_equipment: false,
 };
 
 const CUSTOM_POINT_META: Record<string, { icon: string; color: string; label: string }> = {
@@ -32,6 +33,18 @@ const CUSTOM_POINT_META: Record<string, { icon: string; color: string; label: st
   lainnya: { icon: '📍', color: '#a855f7', label: 'Lainnya' },
 };
 
+const mapDivIcon = (label: string, color: string) => L.divIcon({
+  className: 'asset-div-icon',
+  html: `<div style="background:${color};color:#020817;border:2px solid #f8fafc;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.35)">${label}</div>`,
+  iconSize: [34, 34],
+  iconAnchor: [17, 17],
+  popupAnchor: [0, -17],
+});
+
+const facilityLabel = (type: string) => FACILITY_LABELS[type] || type || 'Lainnya';
+const equipmentLabel = (type: string) => EQUIPMENT_LABELS[type] || type || 'Lainnya';
+const equipmentIcon = (type: string) => EQUIPMENT_ICONS[type] || EQUIPMENT_ICONS.lainnya || 'AST';
+
 export default function MonitoringPeta({ sensors, detection, sirenActive, user }: Props) {
   const [mapSensors, setMapSensors] = useState<MapSensor[]>([]);
   const [mapSirens, setMapSirens] = useState<MapSiren[]>([]);
@@ -39,7 +52,10 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
   const [evacRoutes, setEvacRoutes] = useState<EvacRoute[]>([]);
   const [safeZones, setSafeZones] = useState<SafeZone[]>([]);
   const [inundation, setInundation] = useState<InundationZone[]>([]);
+  const [equipment, setEquipment] = useState<MapEquipment[]>([]);
   const [customPoints, setCustomPoints] = useState<CustomMapPoint[]>([]);
+  const [loadingLayers, setLoadingLayers] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [layers, setLayers] = useState(LAYER_DEFAULTS);
   const [addPointMode, setAddPointMode] = useState(false);
   const [draftPoint, setDraftPoint] = useState<DraftPoint | null>(null);
@@ -48,18 +64,22 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
   const [pointError, setPointError] = useState('');
 
   useEffect(() => {
+    setLoadingLayers(true);
+    setLoadError('');
     Promise.all([
       mapApi.sensors(), mapApi.sirens(), mapApi.facilities(),
-      mapApi.evacRoutes(), mapApi.safeZones(), mapApi.inundation(), mapApi.customPoints(),
-    ]).then(([s, si, f, r, sz, iz, cp]) => {
+      mapApi.evacRoutes(), mapApi.safeZones(), mapApi.inundation(), mapApi.equipment(), mapApi.customPoints(),
+    ]).then(([s, si, f, r, sz, iz, eq, cp]) => {
       setMapSensors(s.data.sensors);
       setMapSirens(si.data.sirens);
       setMapFacilities(f.data.facilities);
       setEvacRoutes(r.data.routes);
       setSafeZones(sz.data.safe_zones);
       setInundation(iz.data.zones);
+      setEquipment(eq.data.equipment);
       setCustomPoints(cp.data.points);
-    }).catch(() => {});
+    }).catch(() => setLoadError('Gagal memuat sebagian layer peta dari backend.'))
+      .finally(() => setLoadingLayers(false));
   }, []);
 
   // Merge live water levels into map sensors
@@ -114,6 +134,8 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
       {/* Layer control */}
       <div className="card" style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="card-title">🗂️ Layer & Legenda</div>
+        {loadingLayers && <div className="infobox" style={{ fontSize: 10 }}>Memuat layer peta...</div>}
+        {loadError && <div className="infobox" style={{ fontSize: 10, borderColor: '#ef4444', color: '#ef4444' }}>{loadError}</div>}
         {Object.entries(layers).map(([key, on]) => (
           <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 11, color: on ? '#f1f5f9' : '#475569' }}>
             <input type="checkbox" checked={on} onChange={() => toggleLayer(key)} style={{ accentColor: '#06b6d4' }} />
@@ -238,7 +260,8 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
               <Popup>
                 <b>🟢 {sz.name}</b><br />
                 Elevasi: {sz.elevation_m}m<br />
-                Kapasitas: {sz.capacity?.toLocaleString('id-ID')} orang
+                Kapasitas: {sz.capacity?.toLocaleString('id-ID')} orang<br />
+                Fasilitas: {sz.facilities?.join(', ') || '-'}
               </Popup>
             </Polygon>
           ))}
@@ -256,8 +279,12 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
               <Popup>
                 <b>{r.name}</b><br />
                 Status: {r.status}<br />
+                Arah: {r.direction || '-'}<br />
+                Keterangan: {r.description || r.notes || '-'}<br />
+                Kapasitas: {r.capacity_persons?.toLocaleString('id-ID') || '-'} orang<br />
                 Jarak: {(r.distance_m / 1000).toFixed(1)} km<br />
-                Est. waktu: {r.estimated_time_min} menit
+                Est. waktu: {r.estimated_time_min} menit<br />
+                Jumlah titik: {r.coordinates.length}
               </Popup>
             </Polyline>
           ))}
@@ -277,8 +304,11 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
               >
                 <Popup>
                   <b>🔊 {s.name}</b><br />
-                  Status: {sirenActive ? '🔴 AKTIF' : '⚫ Tidak Aktif'}<br />
-                  Radius: {s.radius_m}m
+                  Kode: {s.code}<br />
+                  Status: {s.status}<br />
+                  Radius: {s.radius_m}m<br />
+                  Otomatis: {s.is_auto_enabled ? 'Ya' : 'Tidak'}<br />
+                  Aktivasi terakhir: {s.last_activated ? new Date(s.last_activated).toLocaleString('id-ID') : '-'}
                 </Popup>
               </CircleMarker>
               {/* Radius ring */}
@@ -296,22 +326,37 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
 
           {/* Facilities */}
           {layers.facilities && mapFacilities.map(f => (
-            <CircleMarker
+            <Marker
               key={f.id}
-              center={[f.lat, f.lng]}
-              radius={9}
-              pathOptions={{
-                color: FACILITY_COLORS[f.type] || '#757575',
-                fillColor: FACILITY_COLORS[f.type] || '#757575',
-                fillOpacity: 0.85, weight: 2,
-              }}
+              position={[f.lat, f.lng]}
+              icon={mapDivIcon(FACILITY_ICONS[f.type] || FACILITY_ICONS.lainnya || 'FAS', FACILITY_COLORS[f.type] || '#757575')}
             >
               <Popup>
                 <b>{FACILITY_ICONS[f.type]} {f.name}</b><br />
-                Tipe: {f.type.toUpperCase()}<br />
-                {f.phone && <>Telp: {f.phone}</>}
+                Jenis: {facilityLabel(f.type)}<br />
+                {f.address && <>Alamat: {f.address}<br /></>}
+                {f.phone && <>Telp: {f.phone}<br /></>}
+                {(f.description || f.notes) && <>Keterangan: {f.description || f.notes}<br /></>}
+                Koordinat: {f.lat.toFixed(5)}, {f.lng.toFixed(5)}
               </Popup>
-            </CircleMarker>
+            </Marker>
+          ))}
+
+          {/* Heavy equipment */}
+          {layers.heavy_equipment && equipment.map(e => (
+            <Marker
+              key={e.id}
+              position={[e.lat, e.lng]}
+              icon={mapDivIcon(equipmentIcon(e.type), e.status === 'available' ? '#facc15' : e.status === 'in_use' ? '#f97316' : e.status === 'maintenance' ? '#ef4444' : '#94a3b8')}
+            >
+              <Popup>
+                <b>🚧 {e.name}</b><br />
+                Jenis: {equipmentLabel(e.type)}<br />
+                Status: {e.status}<br />
+                {(e.description || e.notes) && <>Keterangan: {e.description || e.notes}<br /></>}
+                Koordinat: {e.lat.toFixed(5)}, {e.lng.toFixed(5)}
+              </Popup>
+            </Marker>
           ))}
 
           {/* Custom admin points */}
@@ -401,10 +446,12 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
               >
                 <Popup>
                   <b>📡 {s.name}</b><br />
+                  Kode: {s.code}<br />
+                  Status: {s.status}<br />
                   Level: <b>{(s.water_level_cm || 0).toFixed(1)} cm</b><br />
                   Δ3m: {(s.delta_3m || 0) > 0 ? '+' : ''}{(s.delta_3m || 0).toFixed(1)} cm<br />
                   Quality: {s.quality?.toUpperCase()}<br />
-                  Kode: {s.code}
+                  Update: {s.last_seen ? new Date(s.last_seen).toLocaleString('id-ID') : '-'}
                 </Popup>
               </CircleMarker>
             );

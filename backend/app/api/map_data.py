@@ -18,6 +18,13 @@ class CustomPointCreate(BaseModel):
     lat: float = Field(..., ge=-90, le=90)
 
 
+class InundationPayload(BaseModel):
+    name: str
+    coordinates: list[list[float]]
+    risk_level: str = "medium"
+    notes: Optional[str] = None
+
+
 def _asyncpg_dsn() -> str:
     return settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
 
@@ -41,14 +48,32 @@ def _require_admin(authorization: Optional[str]) -> dict:
     return user
 
 
+def _polygon_wkt(coords: list[list[float]]) -> str:
+    if len(coords) < 3:
+        raise HTTPException(status_code=422, detail="Zona membutuhkan minimal 3 koordinat")
+    closed = coords if coords[0] == coords[-1] else [*coords, coords[0]]
+    return "POLYGON((" + ", ".join(f"{lng} {lat}" for lng, lat in closed) + "))"
+
+
+async def _audit(conn: asyncpg.Connection, username: str, action: str, entity_type: str, entity_id: str, reason: str):
+    user_id = await conn.fetchval("SELECT id FROM users WHERE username = $1", username)
+    await conn.execute(
+        """
+        INSERT INTO audit_logs (user_id, username, action, entity_type, entity_id, reason)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        """,
+        user_id, username, action, entity_type, entity_id, reason,
+    )
+
+
 async def _ensure_custom_points_table(conn: asyncpg.Connection):
     await conn.execute(
         """
         DO $$
         BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'custom_map_point_type') THEN
-                CREATE TYPE custom_map_point_type AS ENUM ('posko','titik_kumpul','bahaya','informasi','lainnya');
-            END IF;
+            CREATE TYPE custom_map_point_type AS ENUM ('posko','titik_kumpul','bahaya','informasi','lainnya');
+        EXCEPTION WHEN duplicate_object THEN
+            NULL;
         END $$;
 
         CREATE TABLE IF NOT EXISTS custom_map_points (
@@ -119,91 +144,277 @@ async def map_layers():
 
 @router.get("/status")
 async def map_status():
-    return {
-        "sensors_online": 4,
-        "sensors_total": 4,
-        "sirens_active": 0,
-        "sirens_total": 3,
-        "alert_level": "normal",
-        "last_updated": datetime.now(timezone.utc).isoformat(),
-    }
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM sensors WHERE status = 'online') AS sensors_online,
+                (SELECT COUNT(*) FROM sensors) AS sensors_total,
+                (SELECT COUNT(*) FROM sirens WHERE status = 'active') AS sirens_active,
+                (SELECT COUNT(*) FROM sirens) AS sirens_total,
+                (SELECT level::text FROM alerts ORDER BY triggered_at DESC LIMIT 1) AS alert_level
+            """
+        )
+        return {**dict(row), "alert_level": row["alert_level"] or "normal", "last_updated": datetime.now(timezone.utc).isoformat()}
+    finally:
+        await conn.close()
 
 @router.get("/sensors")
 async def map_sensors():
-    return {"sensors": [
-        {"id":"aaaa0001-aaaa-aaaa-aaaa-aaaaaaaaaaaa","code":"SNS-PLG-01","name":"Sensor Pelabuhan Panjang","lng":105.2733,"lat":-5.4712,"status":"online","water_level_cm":120},
-        {"id":"aaaa0002-aaaa-aaaa-aaaa-aaaaaaaaaaaa","code":"SNS-PLG-02","name":"Sensor Teluk Betung","lng":105.2890,"lat":-5.4580,"status":"online","water_level_cm":115},
-        {"id":"aaaa0003-aaaa-aaaa-aaaa-aaaaaaaaaaaa","code":"SNS-PLG-03","name":"Sensor Muara Pidada","lng":105.2610,"lat":-5.4850,"status":"online","water_level_cm":125},
-        {"id":"aaaa0004-aaaa-aaaa-aaaa-aaaaaaaaaaaa","code":"SNS-PLG-04","name":"Sensor Cadangan Pesisir","lng":105.2980,"lat":-5.4640,"status":"online","water_level_cm":118},
-    ]}
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                s.id::text,
+                s.code,
+                s.name,
+                s.status::text,
+                ST_X(s.location::geometry) AS lng,
+                ST_Y(s.location::geometry) AS lat,
+                r.water_level_cm,
+                r.delta_3m,
+                r.quality::text AS quality,
+                r.recorded_at AS last_seen
+            FROM sensors s
+            LEFT JOIN LATERAL (
+                SELECT *
+                FROM sensor_readings sr
+                WHERE sr.sensor_id = s.id
+                ORDER BY sr.recorded_at DESC
+                LIMIT 1
+            ) r ON TRUE
+            ORDER BY s.code
+            """
+        )
+        return {"sensors": [dict(row) for row in rows]}
+    finally:
+        await conn.close()
 
 @router.get("/sirens")
 async def map_sirens():
-    return {"sirens": [
-        {"id":"bbbb0001","code":"SRN-PLG-01","name":"Sirine Pelabuhan Panjang","lng":105.2733,"lat":-5.4720,"radius_m":800,"status":"inactive"},
-        {"id":"bbbb0002","code":"SRN-PLG-02","name":"Sirine Pasar Panjang","lng":105.2811,"lat":-5.4688,"radius_m":600,"status":"inactive"},
-        {"id":"bbbb0003","code":"SRN-PLG-03","name":"Sirine Gudang Pusri","lng":105.2650,"lat":-5.4790,"radius_m":700,"status":"inactive"},
-    ]}
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id::text,
+                code,
+                name,
+                ST_X(location::geometry) AS lng,
+                ST_Y(location::geometry) AS lat,
+                radius_m,
+                status::text,
+                is_auto_enabled,
+                last_activated
+            FROM sirens
+            ORDER BY code
+            """
+        )
+        return {"sirens": [dict(row) for row in rows]}
+    finally:
+        await conn.close()
 
 @router.get("/facilities")
 async def map_facilities():
-    return {"facilities": [
-        {"id":"f001","name":"Polsek Panjang","type":"polisi","lng":105.2756,"lat":-5.4698,"phone":"(0721) 35001"},
-        {"id":"f002","name":"Puskesmas Panjang","type":"medis","lng":105.2820,"lat":-5.4672,"phone":"(0721) 35678"},
-        {"id":"f003","name":"RS Urip Sumoharjo","type":"medis","lng":105.2940,"lat":-5.4610,"phone":"(0721) 772200"},
-        {"id":"f004","name":"Pos Damkar Panjang","type":"damkar","lng":105.2795,"lat":-5.4705,"phone":"(0721) 112"},
-        {"id":"f005","name":"Pos SAR Teluk Lampung","type":"sar","lng":105.2700,"lat":-5.4730,"phone":"(0721) 115"},
-    ]}
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id::text,
+                name,
+                type::text,
+                ST_X(location::geometry) AS lng,
+                ST_Y(location::geometry) AS lat,
+                address,
+                phone,
+                capacity,
+                notes,
+                notes AS description
+            FROM facilities
+            WHERE is_active = TRUE
+            ORDER BY type, name
+            """
+        )
+        return {"facilities": [dict(row) for row in rows]}
+    finally:
+        await conn.close()
 
 @router.get("/evacuation-routes")
 async def map_evacuation():
-    return {"routes": [
-        {
-            "id":"r001","name":"Jalur A - Ke Tanjung Karang","status":"clear","priority":1,
-            "coordinates":[[105.2733,-5.4712],[105.2780,-5.4680],[105.2850,-5.4620],[105.2950,-5.4540],[105.3050,-5.4460]],
-            "distance_m":4800,"estimated_time_min":20
-        },
-        {
-            "id":"r002","name":"Jalur B - Ke Sukabumi","status":"clear","priority":2,
-            "coordinates":[[105.2890,-5.4580],[105.2920,-5.4510],[105.2960,-5.4440],[105.3000,-5.4380]],
-            "distance_m":3600,"estimated_time_min":15
-        },
-        {
-            "id":"r003","name":"Jalur C - Alternatif Timur","status":"clear","priority":3,
-            "coordinates":[[105.2980,-5.4640],[105.3010,-5.4580],[105.3050,-5.4510]],
-            "distance_m":2800,"estimated_time_min":12
-        },
-    ]}
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id::text,
+                name,
+                status::text,
+                priority,
+                direction,
+                notes,
+                notes AS description,
+                capacity_persons,
+                distance_m,
+                estimated_time_min,
+                ST_AsGeoJSON(route)::json AS geojson
+            FROM evacuation_routes
+            ORDER BY priority, name
+            """
+        )
+        routes = []
+        for row in rows:
+            item = dict(row)
+            item["coordinates"] = item.pop("geojson")["coordinates"]
+            routes.append(item)
+        return {"routes": routes}
+    finally:
+        await conn.close()
 
 @router.get("/safe-zones")
 async def map_safe_zones():
-    return {"safe_zones": [
-        {
-            "id":"sz001","name":"GOR Saburai","elevation_m":45,"capacity":5000,"current_count":0,
-            "coordinates":[[105.2940,-5.4480],[105.2970,-5.4480],[105.2970,-5.4510],[105.2940,-5.4510],[105.2940,-5.4480]]
-        },
-        {
-            "id":"sz002","name":"Stadion Pahoman","elevation_m":38,"capacity":8000,"current_count":0,
-            "coordinates":[[105.2600,-5.4350],[105.2640,-5.4350],[105.2640,-5.4380],[105.2600,-5.4380],[105.2600,-5.4350]]
-        },
-        {
-            "id":"sz003","name":"Area Evakuasi Bukit Randu","elevation_m":62,"capacity":2000,"current_count":0,
-            "coordinates":[[105.3040,-5.4440],[105.3080,-5.4440],[105.3080,-5.4480],[105.3040,-5.4480],[105.3040,-5.4440]]
-        },
-    ]}
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id::text,
+                name,
+                elevation_m,
+                capacity,
+                current_count,
+                facilities,
+                ST_AsGeoJSON(zone)::json AS geojson
+            FROM safe_zones
+            WHERE is_active = TRUE
+            ORDER BY name
+            """
+        )
+        zones = []
+        for row in rows:
+            item = dict(row)
+            item["coordinates"] = item.pop("geojson")["coordinates"][0]
+            zones.append(item)
+        return {"safe_zones": zones}
+    finally:
+        await conn.close()
 
 @router.get("/inundation-zones")
 async def map_inundation():
-    return {"zones": [
-        {
-            "id":"iz001","name":"Zona Genangan Tinggi","risk_level":"high",
-            "coordinates":[[105.2600,-5.4700],[105.3000,-5.4700],[105.3000,-5.4800],[105.2600,-5.4800],[105.2600,-5.4700]]
-        },
-        {
-            "id":"iz002","name":"Zona Genangan Sedang","risk_level":"medium",
-            "coordinates":[[105.2600,-5.4620],[105.2850,-5.4620],[105.2850,-5.4700],[105.2600,-5.4700],[105.2600,-5.4620]]
-        },
-    ]}
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id::text,
+                name,
+                risk_level,
+                notes,
+                ST_AsGeoJSON(zone)::json AS geojson
+            FROM inundation_zones
+            ORDER BY risk_level DESC, name
+            """
+        )
+        zones = []
+        for row in rows:
+            item = dict(row)
+            item["coordinates"] = item.pop("geojson")["coordinates"][0]
+            zones.append(item)
+        return {"zones": zones}
+    finally:
+        await conn.close()
+
+
+@router.get("/heavy-equipment")
+async def map_heavy_equipment():
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id::text,
+                name,
+                type,
+                status,
+                notes,
+                notes AS description,
+                ST_X(location::geometry) AS lng,
+                ST_Y(location::geometry) AS lat
+            FROM heavy_equipment
+            ORDER BY status, name
+            """
+        )
+        return {"equipment": [dict(row) for row in rows]}
+    finally:
+        await conn.close()
+
+
+@router.post("/inundation-zones", status_code=201)
+async def create_inundation_zone(req: InundationPayload, authorization: Optional[str] = Header(default=None)):
+    user = _require_admin(authorization)
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO inundation_zones (name, zone, risk_level, notes)
+                VALUES ($1, ST_SetSRID(ST_GeomFromText($2),4326), $3, $4)
+                RETURNING id::text, name, risk_level
+                """,
+                req.name,
+                _polygon_wkt(req.coordinates),
+                req.risk_level,
+                req.notes,
+            )
+            await _audit(conn, user["username"], "CREATE_MASTER_DATA", "inundation_zones", row["id"], f"Zona rawan {req.name} dibuat")
+        return {"success": True, "zone": dict(row)}
+    finally:
+        await conn.close()
+
+
+@router.put("/inundation-zones/{zone_id}")
+async def update_inundation_zone(zone_id: str, req: InundationPayload, authorization: Optional[str] = Header(default=None)):
+    user = _require_admin(authorization)
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE inundation_zones
+                SET name=$2, zone=ST_SetSRID(ST_GeomFromText($3),4326), risk_level=$4, notes=$5
+                WHERE id=$1::uuid
+                RETURNING id::text, name, risk_level
+                """,
+                zone_id,
+                req.name,
+                _polygon_wkt(req.coordinates),
+                req.risk_level,
+                req.notes,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Zona rawan tidak ditemukan")
+            await _audit(conn, user["username"], "UPDATE_MASTER_DATA", "inundation_zones", zone_id, f"Zona rawan {req.name} diperbarui")
+        return {"success": True, "zone": dict(row)}
+    finally:
+        await conn.close()
+
+
+@router.delete("/inundation-zones/{zone_id}")
+async def delete_inundation_zone(zone_id: str, authorization: Optional[str] = Header(default=None)):
+    user = _require_admin(authorization)
+    conn = await asyncpg.connect(_asyncpg_dsn())
+    try:
+        async with conn.transaction():
+            name = await conn.fetchval("SELECT name FROM inundation_zones WHERE id=$1::uuid", zone_id)
+            if not name:
+                raise HTTPException(status_code=404, detail="Zona rawan tidak ditemukan")
+            await conn.execute("DELETE FROM inundation_zones WHERE id=$1::uuid", zone_id)
+            await _audit(conn, user["username"], "DELETE_MASTER_DATA", "inundation_zones", zone_id, f"Zona rawan {name} dihapus")
+        return {"success": True, "zone_id": zone_id}
+    finally:
+        await conn.close()
 
 
 @router.get("/custom-points")
