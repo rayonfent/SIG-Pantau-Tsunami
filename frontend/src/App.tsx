@@ -8,6 +8,7 @@ import { authApi, dataApi, mapApi } from './utils/api';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import MonitoringPeta from './pages/MonitoringPeta';
+import OperatorPage from './pages/OperatorPage';
 import DeteksiAlert from './pages/DeteksiAlert';
 import Evakuasi from './pages/Evakuasi';
 import Fasilitas from './pages/Fasilitas';
@@ -151,7 +152,7 @@ export default function App() {
       .catch(() => {
         localStorage.removeItem('token');
         setUser(null);
-        if (window.location.pathname.startsWith('/admin')) navigate('/login', true);
+        if (window.location.pathname.startsWith('/admin') || window.location.pathname === '/operator') navigate('/login', true);
       });
   }, [navigate]);
 
@@ -159,7 +160,7 @@ export default function App() {
     const token = localStorage.getItem('token');
     if (currentPath === '/login' && user) {
       navigate('/admin/dashboard', true);
-    } else if (currentPath.startsWith('/admin') && !user && !token) {
+    } else if ((currentPath.startsWith('/admin') || currentPath === '/operator') && !user && !token) {
       navigate('/login', true);
     }
   }, [currentPath, user, navigate]);
@@ -219,6 +220,7 @@ export default function App() {
 
   const isLoginRoute = currentPath === '/login';
   const isAdminRoute = currentPath.startsWith('/admin');
+  const isOperatorRoute = currentPath === '/operator';
 
   if (isLoginRoute && user) {
     return null;
@@ -226,11 +228,11 @@ export default function App() {
 
   if (isLoginRoute) return <LoginPage onLogin={handleLogin} />;
 
-  if (isAdminRoute && !user) {
+  if ((isAdminRoute || isOperatorRoute) && !user) {
     return null;
   }
 
-  if (!isAdminRoute) {
+  if (!isAdminRoute && !isOperatorRoute) {
     return (
       <PublicPortal
         currentPath={currentPath}
@@ -245,6 +247,53 @@ export default function App() {
 
   const levelColor = LEVEL_COLORS[effectiveDetection.level];
   const levelLabel = LEVEL_LABEL[effectiveDetection.level];
+
+  if (isOperatorRoute) {
+    return (
+      <div className="app-root">
+        {showWarning && currentAlert && (
+          <WarningOverlay
+            alert={currentAlert}
+            sirenActive={effectiveSirenActive}
+            user={user}
+            onDismiss={handleDismissWarning}
+            onNavigate={(page) => { setActivePage(page); navigate(pathFromPage(page)); }}
+          />
+        )}
+
+        <main className="main-content">
+          <header className="topbar" style={{ borderBottomColor: effectiveDetection.level !== 'normal' ? levelColor : '#e2e8f0' }}>
+            <div className="topbar-left">
+              <h1 className="page-title">Tampilan Operator</h1>
+            </div>
+            <div className="topbar-right">
+              <span className="area-label">📍 Panjang, Bandar Lampung</span>
+              {effectiveSirenActive && (
+                <span className="siren-active-badge">🔊 SIRINE AKTIF</span>
+              )}
+              <span className="time-display" id="clock" />
+            </div>
+          </header>
+
+          <div className="page-body">
+            <OperatorPage
+              sensors={effectiveSensors}
+              detection={effectiveDetection}
+              alertHistory={alertHistory}
+              sirenHistory={sirenHistory}
+              sirenActive={effectiveSirenActive}
+              connected={connected}
+              mode={effectiveMode}
+              user={user}
+              onSimulationPreview={handleSimulationPreview}
+            />
+          </div>
+        </main>
+
+        <Clock />
+      </div>
+    );
+  }
 
   const renderPage = () => {
     const commonProps = { 
