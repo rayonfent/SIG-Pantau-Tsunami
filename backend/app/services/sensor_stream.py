@@ -426,9 +426,21 @@ def get_simulation_state():
     return {**simulation_state, "siren_active": siren_active, "current_level": current_alert_level}
 
 def set_simulation_mode(mode: str, scenario: str = "normal", water_override: float = 0.0, session_id: str | None = None):
+    global current_alert_level, alert_stable_counter, siren_active, sensor_windows, sensor_baseline_windows, last_readings
     simulation_state["mode"] = mode
     simulation_state["scenario"] = scenario
     simulation_state["water_override"] = water_override
     simulation_state["session_id"] = session_id if mode == "simulation" else None
     if mode == "simulation":
         simulation_state["tick"] = 0
+
+    # Reset sensor histories to avoid false delta/anomaly triggers
+    sensor_windows.clear()
+    sensor_baseline_windows.clear()
+    last_readings.clear()
+
+    if mode != "simulation":
+        # Reset alert level and siren when returning to LIVE
+        current_alert_level = "normal"
+        alert_stable_counter = 0
+        siren_active = False

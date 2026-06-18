@@ -114,8 +114,8 @@ async def _require_admin(conn, authorization: Optional[str]) -> str:
         "SELECT role::text FROM users WHERE username=$1 AND is_active=TRUE",
         username,
     )
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Hanya admin yang dapat mengubah fasilitas dan aset")
+    if role not in ("admin", "operator"):
+        raise HTTPException(status_code=403, detail="Hanya admin/operator yang dapat mengubah fasilitas dan aset")
     return username
 
 

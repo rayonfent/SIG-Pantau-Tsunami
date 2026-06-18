@@ -88,8 +88,8 @@ async def map_layers():
             {"id": "facilities",     "label": "Fasilitas Publik",   "default": True},
             {"id": "evacuation",     "label": "Jalur Evakuasi",     "default": True},
             {"id": "safe_zones",     "label": "Titik Kumpul",       "default": True},
-            {"id": "inundation",     "label": "Zona Genangan",      "default": False},
-            {"id": "heavy_equipment","label": "Alat Berat",         "default": False},
+            {"id": "inundation",     "label": "Zona Genangan",      "default": True},
+            {"id": "heavy_equipment","label": "Alat Berat",         "default": True},
         ]
     }
 
@@ -335,7 +335,7 @@ async def map_custom_points():
 
 @router.post("/inundation-zones", status_code=201)
 async def create_inundation_zone(req: InundationPayload, authorization: Optional[str] = Header(default=None)):
-    user = _require_admin(authorization)
+    user = _require_operator_or_admin(authorization)
     conn = await asyncpg.connect(_asyncpg_dsn())
     try:
         async with conn.transaction():

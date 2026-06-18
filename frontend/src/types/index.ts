@@ -95,6 +95,7 @@ export interface SafeZone {
   coordinates: [number, number][];
   facilities?: string[];
   geometry?: { type: 'Polygon'; coordinates: [number, number][][] };
+  is_active?: boolean;
 }
 export interface InundationZone {
   id: string; name: string; risk_level: string;

@@ -75,4 +75,5 @@ export const dataApi = {
   thresholdConfig: () => api.get('/reports/threshold-config'),
   updateThresholdConfig: (payload: any) => api.put('/reports/threshold-config', payload),
   updateInundationZone: (id: string, payload: any) => api.put(`/map/inundation-zones/${id}`, payload),
+  createInundationZone: (payload: any) => api.post('/map/inundation-zones', payload),
 };

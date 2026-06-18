@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, useMapEvents } from 'react-leaflet';
+import { CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, useMapEvents, Circle } from 'react-leaflet';
 import L, { LatLngTuple } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { dataApi, mapApi } from '../utils/api';
@@ -64,7 +64,7 @@ const LAYER_DEFAULTS: Record<LayerKey, boolean> = {
   facilities: true,
   evacuation: true,
   safe_zones: true,
-  inundation: false,
+  inundation: true,
   heavy_equipment: true,
 };
 
@@ -298,7 +298,7 @@ function InundationEditModal({
       return;
     }
     setCoords(prev => [...prev, coord]);
-    setNotice('Titik batas area resapan ditambahkan.');
+    setNotice('Titik batas area rendaman ditambahkan.');
     setError('');
   };
 
@@ -312,9 +312,9 @@ function InundationEditModal({
   };
 
   const validate = () => {
-    if (!form.name.trim()) return 'Nama area resapan wajib diisi.';
+    if (!form.name.trim()) return 'Nama area rendaman wajib diisi.';
     if (!form.risk_level.trim()) return 'Level risiko wajib diisi.';
-    if (coords.length < 3) return 'Area resapan membutuhkan minimal 3 titik.';
+    if (coords.length < 3) return 'Area rendaman membutuhkan minimal 3 titik.';
     return '';
   };
 
@@ -329,91 +329,108 @@ function InundationEditModal({
     setError('');
 
     try {
-      await dataApi.updateInundationZone(zone.id, {
+      const payload = {
         name: form.name.trim(),
         risk_level: form.risk_level.trim().toLowerCase(),
         notes: form.notes.trim() || null,
         coordinates: polygonPreview,
-      });
-      await onSaved('Area resapan berhasil diperbarui.');
+      };
+
+      if (zone.id) {
+        await dataApi.updateInundationZone(zone.id, payload);
+        await onSaved('Area rendaman berhasil diperbarui.');
+      } else {
+        await dataApi.createInundationZone(payload);
+        await onSaved('Area rendaman berhasil ditambahkan.');
+      }
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Gagal menyimpan area resapan.');
+      setError(err?.response?.data?.detail || 'Gagal menyimpan area rendaman.');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(2,8,23,0.78)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div className="card" style={{ width: 'min(1040px, 96vw)', maxHeight: '92vh', overflow: 'auto' }}>
-        <div className="flex justify-between items-center mb-12">
-          <div className="card-title" style={{ margin: 0 }}>Edit Area Resapan</div>
-          <button className="btn btn-outline btn-sm" onClick={onClose} disabled={saving}>Batal</button>
-        </div>
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      width: 480,
+      background: '#ffffff',
+      boxShadow: '-4px 0 24px rgba(15, 23, 42, 0.15)',
+      zIndex: 9999,
+      display: 'flex',
+      flexDirection: 'column',
+      borderLeft: '1px solid #e2e8f0',
+      color: '#1e293b'
+    }}>
+      <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div className="card-title" style={{ margin: 0 }}>{zone.id ? 'Edit Area Rendaman' : 'Tambah Area Rendaman'}</div>
+        <button className="btn btn-outline btn-sm" onClick={onClose} disabled={saving}>Batal</button>
+      </div>
 
-        {notice && <div className="infobox" style={{ borderColor: '#22c55e', color: '#22c55e' }}>{notice}</div>}
-        {error && <div className="infobox" style={{ borderColor: '#ef4444', color: '#ef4444' }}>{error}</div>}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {notice && <div className="infobox" style={{ borderColor: '#22c55e', color: '#22c55e', margin: 0 }}>{notice}</div>}
+        {error && <div className="infobox" style={{ borderColor: '#ef4444', color: '#ef4444', margin: 0 }}>{error}</div>}
 
-        <div className="grid-2">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <label className="text-dim" style={{ fontSize: 11 }}>Nama Area Resapan *</label>
-            <input className="form-input" value={form.name} onChange={event => setForm(prev => ({ ...prev, name: event.target.value }))} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label className="text-dim" style={{ fontSize: 11 }}>Nama Area Rendaman *</label>
+          <input className="form-input" value={form.name} onChange={event => setForm(prev => ({ ...prev, name: event.target.value }))} />
 
-            <label className="text-dim" style={{ fontSize: 11 }}>Level Risiko *</label>
-            <select className="form-input" value={form.risk_level} onChange={event => setForm(prev => ({ ...prev, risk_level: event.target.value }))}>
-              <option value="low">LOW</option>
-              <option value="medium">MEDIUM</option>
-              <option value="high">HIGH</option>
-            </select>
+          <label className="text-dim" style={{ fontSize: 11 }}>Level Risiko *</label>
+          <select className="form-input" value={form.risk_level} onChange={event => setForm(prev => ({ ...prev, risk_level: event.target.value }))}>
+            <option value="low">LOW</option>
+            <option value="medium">MEDIUM</option>
+            <option value="high">HIGH</option>
+          </select>
 
-            <label className="text-dim" style={{ fontSize: 11 }}>Catatan</label>
-            <textarea className="form-input" rows={3} value={form.notes} onChange={event => setForm(prev => ({ ...prev, notes: event.target.value }))} />
+          <label className="text-dim" style={{ fontSize: 11 }}>Catatan</label>
+          <textarea className="form-input" rows={3} value={form.notes} onChange={event => setForm(prev => ({ ...prev, notes: event.target.value }))} />
 
-            <div className="grid-2">
-              <div>
-                <label className="text-dim" style={{ fontSize: 11 }}>Latitude Titik</label>
-                <input className="form-input" value={manualPoint.latitude} onChange={event => setManualPoint(prev => ({ ...prev, latitude: event.target.value }))} placeholder="-5.468900" />
-              </div>
-              <div>
-                <label className="text-dim" style={{ fontSize: 11 }}>Longitude Titik</label>
-                <input className="form-input" value={manualPoint.longitude} onChange={event => setManualPoint(prev => ({ ...prev, longitude: event.target.value }))} placeholder="105.319700" />
-              </div>
+          <div className="grid-2">
+            <div>
+              <label className="text-dim" style={{ fontSize: 11 }}>Latitude Titik</label>
+              <input className="form-input" value={manualPoint.latitude} onChange={event => setManualPoint(prev => ({ ...prev, latitude: event.target.value }))} placeholder="-5.468900" />
             </div>
-
-            <button className="btn btn-outline btn-sm" onClick={addManualCoord} disabled={saving}>Tambah Titik dari Koordinat</button>
-
-            <div className="infobox" style={{ fontSize: 11 }}>
-              Titik batas: {coords.length}<br />
-              Klik peta untuk menambah titik polygon area resapan.
-            </div>
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <button className="btn btn-primary" onClick={save} disabled={saving || coords.length < 3}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
-              <button className="btn btn-outline" onClick={() => { setCoords(prev => prev.slice(0, -1)); setNotice('Titik terakhir dihapus.'); }} disabled={saving || coords.length === 0}>Hapus Titik Terakhir</button>
-              <button className="btn btn-outline" onClick={() => { setCoords([]); setNotice('Batas area resapan direset.'); }} disabled={saving || coords.length === 0}>Reset Area</button>
-              <button className="btn btn-outline" onClick={onClose} disabled={saving}>Batal</button>
+            <div>
+              <label className="text-dim" style={{ fontSize: 11 }}>Longitude Titik</label>
+              <input className="form-input" value={manualPoint.longitude} onChange={event => setManualPoint(prev => ({ ...prev, longitude: event.target.value }))} placeholder="105.319700" />
             </div>
           </div>
 
-          <div>
-            <div className="text-dim" style={{ fontSize: 11, marginBottom: 8 }}>Klik peta untuk menggambar ulang batas area resapan.</div>
-            <div style={{ height: 420, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-              <MapContainer center={center} zoom={14} style={{ height: '100%', width: '100%' }}>
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
-                <InundationPointPicker onSelect={addCoord} />
-                {polygonPreview.length >= 3 && (
-                  <Polygon positions={polygonPreview.map(([lng, lat]) => [lat, lng] as LatLngTuple)} pathOptions={{ color: form.risk_level === 'high' ? '#ef4444' : form.risk_level === 'low' ? '#eab308' : '#f97316', fillOpacity: 0.25, weight: 3 }} />
-                )}
-                {coords.map((coord, index) => (
-                  <CircleMarker key={`${coord[0]}-${coord[1]}-${index}`} center={[coord[1], coord[0]]} radius={index === 0 ? 7 : 5} pathOptions={{ color: '#0f4c81', fillColor: '#ffffff', fillOpacity: 1, weight: 3 }}>
-                    <Popup>
-                      Titik {index + 1}<br />
-                      {coord[1].toFixed(6)}, {coord[0].toFixed(6)}
-                    </Popup>
-                  </CircleMarker>
-                ))}
-              </MapContainer>
-            </div>
+          <button className="btn btn-outline btn-sm" onClick={addManualCoord} disabled={saving}>Tambah Titik dari Koordinat</button>
+
+          <div className="infobox" style={{ fontSize: 11, margin: 0 }}>
+            Titik batas: {coords.length}<br />
+            Klik peta untuk menambah titik polygon area rendaman.
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button className="btn btn-primary" onClick={save} disabled={saving || coords.length < 3}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
+            <button className="btn btn-outline" onClick={() => { setCoords(prev => prev.slice(0, -1)); setNotice('Titik terakhir dihapus.'); }} disabled={saving || coords.length === 0}>Hapus Titik Terakhir</button>
+            <button className="btn btn-outline" onClick={() => { setCoords([]); setNotice('Batas area rendaman direset.'); }} disabled={saving || coords.length === 0}>Reset Area</button>
+          </div>
+        </div>
+
+        <div>
+          <div className="text-dim" style={{ fontSize: 11, marginBottom: 8 }}>Klik peta untuk menggambar batas area rendaman.</div>
+          <div style={{ height: 260, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+            <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+              <InundationPointPicker onSelect={addCoord} />
+              {polygonPreview.length >= 3 && (
+                <Polygon positions={polygonPreview.map(([lng, lat]) => [lat, lng] as LatLngTuple)} pathOptions={{ color: form.risk_level === 'high' ? '#ef4444' : form.risk_level === 'low' ? '#eab308' : '#f97316', fillOpacity: 0.25, weight: 3 }} />
+              )}
+              {coords.map((coord, index) => (
+                <CircleMarker key={`${coord[0]}-${coord[1]}-${index}`} center={[coord[1], coord[0]]} radius={index === 0 ? 7 : 5} pathOptions={{ color: '#0f4c81', fillColor: '#ffffff', fillOpacity: 1, weight: 3 }}>
+                  <Popup>
+                    Titik {index + 1}<br />
+                    {coord[1].toFixed(6)}, {coord[0].toFixed(6)}
+                  </Popup>
+                </CircleMarker>
+              ))}
+            </MapContainer>
           </div>
         </div>
       </div>
@@ -741,44 +758,6 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
           </div>
         </div>
 
-        <div>
-          <div className="section-title">Area Resapan</div>
-          {actionMessage && <div className="infobox" style={{ marginBottom: 8, borderColor: '#22c55e', color: '#22c55e', fontSize: 11 }}>{actionMessage}</div>}
-          {actionError && <div className="infobox" style={{ marginBottom: 8, borderColor: '#ef4444', color: '#ef4444', fontSize: 11 }}>{actionError}</div>}
-          {!canEditInundation && (
-            <div className="infobox" style={{ fontSize: 11 }}>
-              Role Anda saat ini hanya dapat melihat area resapan.
-            </div>
-          )}
-          {inundation.length === 0 ? (
-            <div className="infobox" style={{ fontSize: 11 }}>
-              Belum ada data area resapan.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {inundation.map(zone => (
-                <div key={zone.id} className="stat-box" style={{ padding: 10, display: 'grid', gap: 6 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1f2937' }}>{zone.name}</div>
-                  <div className="route-meta">Risiko: {(zone.risk_level || '-').toUpperCase()}</div>
-                  <div className="route-meta">Titik polygon: {zone.coordinates?.length || 0}</div>
-                  {canEditInundation && (
-                    <button
-                      className="btn btn-outline btn-sm"
-                      onClick={() => {
-                        setActionMessage('');
-                        setActionError('');
-                        setEditingInundationZone(zone);
-                      }}
-                    >
-                      Edit Area
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {dispatchPlan ? (
           <div>
             <div className="section-title">Rencana Perjalanan</div>
@@ -817,6 +796,62 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
           </div>
         )}
 
+        <div>
+          <div className="section-title">Area Rendaman</div>
+          {actionMessage && <div className="infobox" style={{ marginBottom: 8, borderColor: '#22c55e', color: '#22c55e', fontSize: 11 }}>{actionMessage}</div>}
+          {actionError && <div className="infobox" style={{ marginBottom: 8, borderColor: '#ef4444', color: '#ef4444', fontSize: 11 }}>{actionError}</div>}
+          {!canEditInundation && (
+            <div className="infobox" style={{ fontSize: 11 }}>
+              Role Anda saat ini hanya dapat melihat area rendaman.
+            </div>
+          )}
+          {inundation.length === 0 ? (
+            <div className="infobox" style={{ fontSize: 11 }}>
+              Belum ada data area rendaman.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {inundation.map(zone => (
+                <div key={zone.id} className="stat-box" style={{ padding: 10, display: 'grid', gap: 6 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1f2937' }}>{zone.name}</div>
+                  <div className="route-meta">Risiko: {(zone.risk_level || '-').toUpperCase()}</div>
+                  <div className="route-meta">Titik polygon: {zone.coordinates?.length || 0}</div>
+                  {canEditInundation && (
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => {
+                        setActionMessage('');
+                        setActionError('');
+                        setEditingInundationZone(zone);
+                      }}
+                    >
+                      Edit Area
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {canEditInundation && (
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                setActionMessage('');
+                setActionError('');
+                setEditingInundationZone({
+                  id: 0,
+                  name: '',
+                  risk_level: 'medium',
+                  coordinates: [],
+                } as any);
+              }}
+            >
+              + Tambah Area Rendaman
+            </button>
+          )}
+        </div>
+
         <div style={{ marginTop: 'auto', padding: 10, borderRadius: 6, background: LEVEL_COLORS[detection.level] + '22', border: `1px solid ${LEVEL_COLORS[detection.level]}`, textAlign: 'center', color: LEVEL_COLORS[detection.level], fontSize: 12, fontWeight: 700 }}>
           {user?.full_name || 'Operator'} • {user?.role?.toUpperCase()}
           {sirenActive && <div style={{ fontSize: 10, marginTop: 4 }}>🔊 Sirine aktif — operator dapat mengendalikan penghentian sesuai SOP</div>}
@@ -852,7 +887,7 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
                       }}
                       style={{ marginTop: 6 }}
                     >
-                      Edit Area Resapan
+                      Edit Area Rendaman
                     </button>
                   </>
                 )}
@@ -937,9 +972,9 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
                   Radius: {siren.radius_m}m
                 </Popup>
               </CircleMarker>
-              <CircleMarker
+              <Circle
                 center={[siren.lat, siren.lng]}
-                radius={siren.radius_m / 15}
+                radius={siren.radius_m || 500}
                 pathOptions={{ color: sirenActive ? '#ef4444' : '#475569', fillColor: 'transparent', fillOpacity: 0, weight: 1, opacity: 0.3 }}
               />
             </React.Fragment>

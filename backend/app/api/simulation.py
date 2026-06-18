@@ -80,6 +80,7 @@ async def stop_simulation(authorization: Optional[str] = Header(default=None)):
     state = get_simulation_state()
     session_id = state.get("session_id")
     conn = await asyncpg.connect(_dsn())
+    active_siren_ids = []
     try:
         async with conn.transaction():
             user_id = await conn.fetchval("SELECT id FROM users WHERE username = $1", username)
@@ -107,6 +108,39 @@ async def stop_simulation(authorization: Optional[str] = Header(default=None)):
                 username,
                 session_id,
             )
+            # Resolving any active/confirmed alerts in the database
+            await conn.execute(
+                """
+                UPDATE alerts
+                SET status = 'resolved',
+                    resolved_at = NOW(),
+                    resolution_note = 'Simulasi dihentikan'
+                WHERE status IN ('active', 'confirmed')
+                """
+            )
+            # Find all active sirens so we can log their deactivation events
+            active_siren_rows = await conn.fetch("SELECT id::text FROM sirens WHERE status = 'active'")
+            active_siren_ids = [row["id"] for row in active_siren_rows]
+            
+            # Deactivate sirens
+            await conn.execute("UPDATE sirens SET status = 'inactive'")
+            
+            # Log deactivation events
+            for sid in active_siren_ids:
+                await conn.execute(
+                    """
+                    INSERT INTO siren_events (siren_id, event_type, reason, success)
+                    VALUES ($1::uuid, 'normal_off', 'Simulasi dihentikan', TRUE)
+                    """,
+                    sid,
+                )
+            if active_siren_ids:
+                await conn.execute(
+                    """
+                    INSERT INTO audit_logs (username, action, entity_type, reason)
+                    VALUES ('system', 'SIREN_DEACTIVATED', 'sirens', 'Simulasi dihentikan')
+                    """
+                )
     finally:
         await conn.close()
 
@@ -114,6 +148,25 @@ async def stop_simulation(authorization: Optional[str] = Header(default=None)):
     await manager.broadcast_simulation({
         "action": "stop",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    
+    if active_siren_ids:
+        await manager.broadcast_siren({
+            "action": "auto_off",
+            "reason": "Simulasi dihentikan",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    # Broadcast immediate clean update to clear any visual alert in frontend
+    await manager.broadcast_sensor_update({
+        "sensors": [],
+        "detection": {
+            "level": "normal",
+            "confidence_score": 0,
+            "confidence_label": "Normal",
+            "siren_active": False,
+        },
+        "mode": "live",
     })
     return {"success": True, "mode": "live"}
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, Polyline, Polygon, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, Polyline, Polygon, Marker, Circle } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { mapApi } from '../utils/api';
@@ -16,8 +16,8 @@ interface Props {
 
 const LAYER_DEFAULTS = {
   sensors: true, sirens: true, facilities: true,
-  evacuation: true, safe_zones: true, inundation: false,
-  heavy_equipment: false,
+  evacuation: true, safe_zones: true, inundation: true,
+  heavy_equipment: true,
 };
 
 const mapDivIcon = (label: string, color: string) => L.divIcon({
@@ -246,7 +246,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
           ))}
 
           {/* Safe zones */}
-          {layers.safe_zones && safeZones.map(sz => (
+          {layers.safe_zones && safeZones.filter(sz => sz.is_active !== false).map(sz => (
             <Polygon
               key={sz.id}
               positions={sz.coordinates.map(([lng, lat]) => [lat, lng])}
@@ -307,9 +307,9 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
                 </Popup>
               </CircleMarker>
               {/* Radius ring */}
-              <CircleMarker
+              <Circle
                 center={[s.lat, s.lng]}
-                radius={s.radius_m / 15}
+                radius={s.radius_m || 500}
                 pathOptions={{
                   color: sirenActive ? '#ef4444' : '#475569',
                   fillColor: 'transparent',
