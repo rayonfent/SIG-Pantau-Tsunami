@@ -41,6 +41,13 @@ def _require_admin(authorization: Optional[str]) -> dict:
     return user
 
 
+def _require_operator_or_admin(authorization: Optional[str]) -> dict:
+    user = _user_from_token(authorization)
+    if user["role"] not in {"operator", "admin"}:
+        raise HTTPException(status_code=403, detail="Hanya operator/admin yang dapat mengubah area resapan")
+    return user
+
+
 def _polygon_wkt(coords: list[list[float]]) -> str:
     if len(coords) < 3:
         raise HTTPException(status_code=422, detail="Zona membutuhkan minimal 3 koordinat")
@@ -351,7 +358,7 @@ async def create_inundation_zone(req: InundationPayload, authorization: Optional
 
 @router.put("/inundation-zones/{zone_id}")
 async def update_inundation_zone(zone_id: str, req: InundationPayload, authorization: Optional[str] = Header(default=None)):
-    user = _require_admin(authorization)
+    user = _require_operator_or_admin(authorization)
     conn = await asyncpg.connect(_asyncpg_dsn())
     try:
         async with conn.transaction():
@@ -390,5 +397,6 @@ async def delete_inundation_zone(zone_id: str, authorization: Optional[str] = He
         return {"success": True, "zone_id": zone_id}
     finally:
         await conn.close()
+
 
 

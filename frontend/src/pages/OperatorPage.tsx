@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, useMapEvents } from 'react-leaflet';
 import L, { LatLngTuple } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { mapApi } from '../utils/api';
+import { dataApi, mapApi } from '../utils/api';
 import {
   FACILITY_COLORS,
   FACILITY_ICONS,
@@ -100,6 +100,7 @@ const equipmentLabel = (type: string) => EQUIPMENT_LABELS[type] || type || 'Lain
 const equipmentIcon = (type: string) => EQUIPMENT_ICONS[type] || EQUIPMENT_ICONS.lainnya || 'AST';
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const toRadians = (value: number) => (value * Math.PI) / 180;
+const parseCoordinateInput = (value: string) => Number(String(value).replace(',', '.'));
 
 const haversineKm = (from: LatLngTuple, to: LatLngTuple) => {
   const earthRadiusKm = 6371;
@@ -242,6 +243,184 @@ function MapWaypointSelector({
   return null;
 }
 
+function InundationPointPicker({
+  onSelect,
+}: {
+  onSelect: (coordinate: [number, number]) => void;
+}) {
+  useMapEvents({
+    click(event) {
+      onSelect([event.latlng.lng, event.latlng.lat]);
+    },
+  });
+
+  return null;
+}
+
+function InundationEditModal({
+  zone,
+  onClose,
+  onSaved,
+}: {
+  zone: InundationZone;
+  onClose: () => void;
+  onSaved: (message: string) => Promise<void> | void;
+}) {
+  const normalizeCoordinates = (coordinates: [number, number][]) => {
+    if (coordinates.length < 2) return coordinates;
+    const first = coordinates[0];
+    const last = coordinates[coordinates.length - 1];
+    if (first[0] === last[0] && first[1] === last[1]) return coordinates.slice(0, -1);
+    return coordinates;
+  };
+
+  const [form, setForm] = useState({
+    name: zone.name || '',
+    risk_level: zone.risk_level || 'medium',
+    notes: (zone as any).notes || '',
+  });
+  const [coords, setCoords] = useState<[number, number][]>(normalizeCoordinates(zone.coordinates || []));
+  const [manualPoint, setManualPoint] = useState({ latitude: '', longitude: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const polygonPreview = coords.length >= 3 ? [...coords, coords[0]] : coords;
+  const center: LatLngTuple = coords[0] ? [coords[0][1], coords[0][0]] : MAP_CENTER;
+
+  const addCoord = (coord: [number, number]) => {
+    if (!Number.isFinite(coord[0]) || !Number.isFinite(coord[1])) {
+      setError('Koordinat tidak valid.');
+      return;
+    }
+    if (coord[1] < -90 || coord[1] > 90 || coord[0] < -180 || coord[0] > 180) {
+      setError('Koordinat berada di luar rentang yang valid.');
+      return;
+    }
+    setCoords(prev => [...prev, coord]);
+    setNotice('Titik batas area resapan ditambahkan.');
+    setError('');
+  };
+
+  const addManualCoord = () => {
+    const latitude = parseCoordinateInput(manualPoint.latitude);
+    const longitude = parseCoordinateInput(manualPoint.longitude);
+    addCoord([longitude, latitude]);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      setManualPoint({ latitude: '', longitude: '' });
+    }
+  };
+
+  const validate = () => {
+    if (!form.name.trim()) return 'Nama area resapan wajib diisi.';
+    if (!form.risk_level.trim()) return 'Level risiko wajib diisi.';
+    if (coords.length < 3) return 'Area resapan membutuhkan minimal 3 titik.';
+    return '';
+  };
+
+  const save = async () => {
+    const validation = validate();
+    if (validation) {
+      setError(validation);
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    try {
+      await dataApi.updateInundationZone(zone.id, {
+        name: form.name.trim(),
+        risk_level: form.risk_level.trim().toLowerCase(),
+        notes: form.notes.trim() || null,
+        coordinates: polygonPreview,
+      });
+      await onSaved('Area resapan berhasil diperbarui.');
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Gagal menyimpan area resapan.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(2,8,23,0.78)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div className="card" style={{ width: 'min(1040px, 96vw)', maxHeight: '92vh', overflow: 'auto' }}>
+        <div className="flex justify-between items-center mb-12">
+          <div className="card-title" style={{ margin: 0 }}>Edit Area Resapan</div>
+          <button className="btn btn-outline btn-sm" onClick={onClose} disabled={saving}>Batal</button>
+        </div>
+
+        {notice && <div className="infobox" style={{ borderColor: '#22c55e', color: '#22c55e' }}>{notice}</div>}
+        {error && <div className="infobox" style={{ borderColor: '#ef4444', color: '#ef4444' }}>{error}</div>}
+
+        <div className="grid-2">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label className="text-dim" style={{ fontSize: 11 }}>Nama Area Resapan *</label>
+            <input className="form-input" value={form.name} onChange={event => setForm(prev => ({ ...prev, name: event.target.value }))} />
+
+            <label className="text-dim" style={{ fontSize: 11 }}>Level Risiko *</label>
+            <select className="form-input" value={form.risk_level} onChange={event => setForm(prev => ({ ...prev, risk_level: event.target.value }))}>
+              <option value="low">LOW</option>
+              <option value="medium">MEDIUM</option>
+              <option value="high">HIGH</option>
+            </select>
+
+            <label className="text-dim" style={{ fontSize: 11 }}>Catatan</label>
+            <textarea className="form-input" rows={3} value={form.notes} onChange={event => setForm(prev => ({ ...prev, notes: event.target.value }))} />
+
+            <div className="grid-2">
+              <div>
+                <label className="text-dim" style={{ fontSize: 11 }}>Latitude Titik</label>
+                <input className="form-input" value={manualPoint.latitude} onChange={event => setManualPoint(prev => ({ ...prev, latitude: event.target.value }))} placeholder="-5.468900" />
+              </div>
+              <div>
+                <label className="text-dim" style={{ fontSize: 11 }}>Longitude Titik</label>
+                <input className="form-input" value={manualPoint.longitude} onChange={event => setManualPoint(prev => ({ ...prev, longitude: event.target.value }))} placeholder="105.319700" />
+              </div>
+            </div>
+
+            <button className="btn btn-outline btn-sm" onClick={addManualCoord} disabled={saving}>Tambah Titik dari Koordinat</button>
+
+            <div className="infobox" style={{ fontSize: 11 }}>
+              Titik batas: {coords.length}<br />
+              Klik peta untuk menambah titik polygon area resapan.
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <button className="btn btn-primary" onClick={save} disabled={saving || coords.length < 3}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
+              <button className="btn btn-outline" onClick={() => { setCoords(prev => prev.slice(0, -1)); setNotice('Titik terakhir dihapus.'); }} disabled={saving || coords.length === 0}>Hapus Titik Terakhir</button>
+              <button className="btn btn-outline" onClick={() => { setCoords([]); setNotice('Batas area resapan direset.'); }} disabled={saving || coords.length === 0}>Reset Area</button>
+              <button className="btn btn-outline" onClick={onClose} disabled={saving}>Batal</button>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-dim" style={{ fontSize: 11, marginBottom: 8 }}>Klik peta untuk menggambar ulang batas area resapan.</div>
+            <div style={{ height: 420, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+              <MapContainer center={center} zoom={14} style={{ height: '100%', width: '100%' }}>
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+                <InundationPointPicker onSelect={addCoord} />
+                {polygonPreview.length >= 3 && (
+                  <Polygon positions={polygonPreview.map(([lng, lat]) => [lat, lng] as LatLngTuple)} pathOptions={{ color: form.risk_level === 'high' ? '#ef4444' : form.risk_level === 'low' ? '#eab308' : '#f97316', fillOpacity: 0.25, weight: 3 }} />
+                )}
+                {coords.map((coord, index) => (
+                  <CircleMarker key={`${coord[0]}-${coord[1]}-${index}`} center={[coord[1], coord[0]]} radius={index === 0 ? 7 : 5} pathOptions={{ color: '#0f4c81', fillColor: '#ffffff', fillOpacity: 1, weight: 3 }}>
+                    <Popup>
+                      Titik {index + 1}<br />
+                      {coord[1].toFixed(6)}, {coord[0].toFixed(6)}
+                    </Popup>
+                  </CircleMarker>
+                ))}
+              </MapContainer>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OperatorPage({ sensors, detection, sirenActive, user }: Props) {
   const [mapSensors, setMapSensors] = useState<MapSensor[]>([]);
   const [mapSirens, setMapSirens] = useState<MapSiren[]>([]);
@@ -257,6 +436,9 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
   const [dispatchPlan, setDispatchPlan] = useState<DispatchPlan | null>(null);
   const [animationProgress, setAnimationProgress] = useState(0);
   const [animationRunning, setAnimationRunning] = useState(false);
+  const [editingInundationZone, setEditingInundationZone] = useState<InundationZone | null>(null);
+  const [actionMessage, setActionMessage] = useState('');
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -461,9 +643,30 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
   const operatorInstruction = selectedAsset
     ? 'Klik peta untuk menentukan waypoint tujuan. Sistem akan memilih koridor jalan utama/evakuasi terdekat secara otomatis.'
     : 'Pilih dahulu fasilitas atau aset yang akan diberangkatkan, lalu klik titik tujuan di peta.';
+  const canEditInundation = user?.role === 'operator' || user?.role === 'admin';
+
+  const handleInundationSaved = async (message: string) => {
+    setEditingInundationZone(null);
+    setActionMessage(message);
+    setActionError('');
+    try {
+      const response = await mapApi.inundation();
+      setInundation(Array.isArray(response.data?.zones) ? response.data.zones : []);
+    } catch {
+      setActionError('Perubahan tersimpan, tetapi daftar area resapan gagal diperbarui otomatis.');
+    }
+  };
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 110px)', gap: 12 }}>
+      {editingInundationZone && (
+        <InundationEditModal
+          zone={editingInundationZone}
+          onClose={() => setEditingInundationZone(null)}
+          onSaved={handleInundationSaved}
+        />
+      )}
+
       <div className="card" style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, overflow: 'auto' }}>
         <div>
           <div className="card-title">🧭 Konsol Operator</div>
@@ -538,6 +741,44 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
           </div>
         </div>
 
+        <div>
+          <div className="section-title">Area Resapan</div>
+          {actionMessage && <div className="infobox" style={{ marginBottom: 8, borderColor: '#22c55e', color: '#22c55e', fontSize: 11 }}>{actionMessage}</div>}
+          {actionError && <div className="infobox" style={{ marginBottom: 8, borderColor: '#ef4444', color: '#ef4444', fontSize: 11 }}>{actionError}</div>}
+          {!canEditInundation && (
+            <div className="infobox" style={{ fontSize: 11 }}>
+              Role Anda saat ini hanya dapat melihat area resapan.
+            </div>
+          )}
+          {inundation.length === 0 ? (
+            <div className="infobox" style={{ fontSize: 11 }}>
+              Belum ada data area resapan.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {inundation.map(zone => (
+                <div key={zone.id} className="stat-box" style={{ padding: 10, display: 'grid', gap: 6 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1f2937' }}>{zone.name}</div>
+                  <div className="route-meta">Risiko: {(zone.risk_level || '-').toUpperCase()}</div>
+                  <div className="route-meta">Titik polygon: {zone.coordinates?.length || 0}</div>
+                  {canEditInundation && (
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => {
+                        setActionMessage('');
+                        setActionError('');
+                        setEditingInundationZone(zone);
+                      }}
+                    >
+                      Edit Area
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {dispatchPlan ? (
           <div>
             <div className="section-title">Rencana Perjalanan</div>
@@ -599,6 +840,22 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               <Popup>
                 <b>{zone.name}</b><br />
                 Risiko: {zone.risk_level}
+                {canEditInundation && (
+                  <>
+                    <br />
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => {
+                        setActionMessage('');
+                        setActionError('');
+                        setEditingInundationZone(zone);
+                      }}
+                      style={{ marginTop: 6 }}
+                    >
+                      Edit Area Resapan
+                    </button>
+                  </>
+                )}
               </Popup>
             </Polygon>
           ))}

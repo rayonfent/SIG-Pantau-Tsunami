@@ -20,7 +20,7 @@ const SCENARIOS = [
   { id: 'normal',         label: '🌊 Normal (tidal biasa)',         desc: 'Sinusoidal ±3cm, noise acak' },
   { id: 'naik_cepat',     label: '🔴 Air Naik Cepat',              desc: 'Kenaikan +5cm/menit → trigger siaga/awas' },
   { id: 'surut_mendadak', label: '🟠 Surutnya Mendadak',           desc: 'Penurunan -8cm/menit → anomali drastis' },
-  { id: 'sensor_offline', label: '⚫ Sensor SNS-PLG-01 Offline',   desc: 'Simulasi sensor utama mati, fallback ke cadangan' },
+   { id: 'sensor_offline', label: '⚫ Sensor SNS-PLG-01 Offline',   desc: 'Simulasi sensor utama mati, fallback ke cadangan' },
 ];
 
 const SCENARIO_LABELS = Object.fromEntries(SCENARIOS.map((item) => [item.id, item.label])) as Record<string, string>;
