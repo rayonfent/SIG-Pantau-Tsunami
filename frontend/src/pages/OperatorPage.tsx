@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, useMapEvents, Circle } from 'react-leaflet';
+import { CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, useMapEvents, Circle, useMap } from 'react-leaflet';
 import L, { LatLngTuple } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { dataApi, mapApi } from '../utils/api';
@@ -34,7 +34,7 @@ interface Props {
 }
 
 type LayerKey = 'sensors' | 'sirens' | 'facilities' | 'evacuation' | 'safe_zones' | 'inundation' | 'heavy_equipment';
-type DispatchAssetType = 'facility' | 'equipment';
+type DispatchAssetType = 'equipment';
 
 type DispatchAsset = {
   id: string;
@@ -44,7 +44,6 @@ type DispatchAsset = {
   lat: number;
   lng: number;
   status?: string;
-  address?: string;
   description?: string;
 };
 
@@ -225,6 +224,16 @@ const buildDispatchPlan = (asset: DispatchAsset, waypoint: LatLngTuple, routes: 
 
   return bestPlan!;
 };
+
+function MapFocusController({ center }: { center: LatLngTuple | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center && Number.isFinite(center[0]) && Number.isFinite(center[1])) {
+      map.setView(center, 15);
+    }
+  }, [map, center]);
+  return null;
+}
 
 function MapWaypointSelector({
   enabled,
@@ -456,6 +465,7 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
   const [editingInundationZone, setEditingInundationZone] = useState<InundationZone | null>(null);
   const [actionMessage, setActionMessage] = useState('');
   const [actionError, setActionError] = useState('');
+  const [focusCenter, setFocusCenter] = useState<LatLngTuple | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -590,16 +600,6 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
 
   const dispatchAssets = useMemo<DispatchAsset[]>(
     () => [
-      ...mapFacilities.map(facility => ({
-        id: `facility-${facility.id}`,
-        name: facility.name,
-        type: facility.type,
-        category: 'facility' as const,
-        lat: facility.lat,
-        lng: facility.lng,
-        address: facility.address,
-        description: facility.description || facility.notes,
-      })),
       ...equipment.map(item => ({
         id: `equipment-${item.id}`,
         name: item.name,
@@ -611,7 +611,7 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
         description: item.description || item.notes,
       })),
     ],
-    [equipment, mapFacilities],
+    [equipment],
   );
 
   const selectedAsset = useMemo(
@@ -657,9 +657,6 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
     setAnimationProgress(0);
   };
 
-  const operatorInstruction = selectedAsset
-    ? 'Klik peta untuk menentukan waypoint tujuan. Sistem akan memilih koridor jalan utama/evakuasi terdekat secara otomatis.'
-    : 'Pilih dahulu fasilitas atau aset yang akan diberangkatkan, lalu klik titik tujuan di peta.';
   const canEditInundation = user?.role === 'operator' || user?.role === 'admin';
 
   const handleInundationSaved = async (message: string) => {
@@ -675,7 +672,7 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
   };
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 110px)', gap: 12 }}>
+    <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 110px)', overflow: 'hidden' }}>
       {editingInundationZone && (
         <InundationEditModal
           zone={editingInundationZone}
@@ -684,186 +681,257 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
         />
       )}
 
-      <div className="card" style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, overflow: 'auto' }}>
-        <div>
-          <div className="card-title">🧭 Konsol Operator</div>
-          <div className="infobox" style={{ fontSize: 11, lineHeight: 1.6 }}>
-            Operator dapat memilih fasilitas/aset, mematikan sirine sesuai prosedur, lalu mengirim unit ke waypoint tujuan dengan rute otomatis mengikuti koridor jalan utama.
+      {/* FLOATING STATUS PANEL - Top Left */}
+      <div style={{
+        position: 'absolute',
+        top: 10,
+        left: 60,
+        zIndex: 1000,
+        width: 250,
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(4px)',
+        borderRadius: 8,
+        boxShadow: '0 4px 20px rgba(15, 23, 42, 0.15)',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        border: '1px solid #e2e8f0',
+        color: '#1e293b'
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>🧭 Status Operasi</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <div style={{ background: '#f8fafc', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+            <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>LEVEL</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: LEVEL_COLORS[detection.level] }}>
+              {detection.level.toUpperCase()}
+            </div>
+          </div>
+          <div style={{ background: '#f8fafc', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+            <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>SIRINE</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: sirenActive ? '#ef4444' : '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+              {sirenActive && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block', animation: 'pulse 1s infinite' }} />}
+              {sirenActive ? 'AKTIF' : 'OFF'}
+            </div>
           </div>
         </div>
-
-        <div>
-          <div className="section-title">Status Operasi</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <div className="stat-box" style={{ padding: 12 }}>
-              <div className="stat-label">Level</div>
-              <div className="stat-value" style={{ fontSize: 22, color: LEVEL_COLORS[detection.level] }}>
-                {detection.level.toUpperCase()}
-              </div>
-            </div>
-            <div className="stat-box" style={{ padding: 12 }}>
-              <div className="stat-label">Sirine</div>
-              <div className="stat-value" style={{ fontSize: 22, color: sirenActive ? '#ef4444' : '#22c55e' }}>
-                {sirenActive ? 'AKTIF' : 'OFF'}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <div className="section-title">Dispatch Aset</div>
-          <label className="form-label">Pilih fasilitas/aset awal</label>
-          <select
-            className="form-input"
-            value={selectedAssetId}
-            onChange={(event) => {
-              setSelectedAssetId(event.target.value);
-              setDispatchPlan(null);
-              setAnimationRunning(false);
-              setAnimationProgress(0);
-            }}
-          >
-            <option value="">-- Pilih aset/fasilitas --</option>
-            {dispatchAssets.map(asset => (
-              <option key={asset.id} value={asset.id}>
-                {asset.category === 'facility' ? 'Fasilitas' : 'Aset'} • {asset.name}
-              </option>
-            ))}
-          </select>
-
-          {selectedAsset && (
-            <div className="infobox" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.6 }}>
-              <b>{selectedAsset.category === 'facility' ? 'Fasilitas' : 'Aset'}:</b> {selectedAsset.name}<br />
-              <b>Jenis:</b> {selectedAsset.category === 'facility' ? facilityLabel(selectedAsset.type) : equipmentLabel(selectedAsset.type)}<br />
-              {selectedAsset.status && <><b>Status:</b> {selectedAsset.status}<br /></>}
-              {selectedAsset.address && <><b>Alamat:</b> {selectedAsset.address}<br /></>}
-              <b>Koordinat:</b> {selectedAsset.lat.toFixed(5)}, {selectedAsset.lng.toFixed(5)}
-            </div>
-          )}
-
-          <div className="infobox" style={{ marginTop: 10, fontSize: 11 }}>
-            {operatorInstruction}
-          </div>
-        </div>
-
-        <div>
-          <div className="section-title">Layer & Legenda</div>
-          <div style={{ display: 'grid', gap: 6 }}>
-            {Object.entries(layers).map(([key, enabled]) => (
-              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 11, color: enabled ? '#1f2937' : '#64748b' }}>
-                <input type="checkbox" checked={enabled} onChange={() => toggleLayer(key as LayerKey)} style={{ accentColor: '#06b6d4' }} />
-                {key.replace(/_/g, ' ').toUpperCase()}
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {dispatchPlan ? (
-          <div>
-            <div className="section-title">Rencana Perjalanan</div>
-            <div className="stat-box" style={{ padding: 12, gap: 8 }}>
-              <div className="stat-label">Unit Terpilih</div>
-              <div style={{ fontWeight: 700 }}>{dispatchPlan.asset.name}</div>
-              <div className="route-meta">Koridor utama: {dispatchPlan.roadName}</div>
-              <div className="route-meta">Jarak total: {dispatchPlan.distanceKm.toFixed(2)} km</div>
-              <div className="route-meta">Estimasi waktu: {dispatchPlan.estimatedMinutes} menit</div>
-              <div className="route-meta">Kecepatan simulasi: {dispatchPlan.travelSpeedKmh} km/jam</div>
-              <div className="route-meta">
-                Waypoint: {dispatchPlan.waypoint[0].toFixed(5)}, {dispatchPlan.waypoint[1].toFixed(5)}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-                <button className="btn btn-primary btn-sm" onClick={handleStartAnimation}>
-                  ▶ Mulai Animasi
-                </button>
-                <button className="btn btn-outline btn-sm" onClick={handleResetDispatch}>
-                  Reset Jalur
-                </button>
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <div className="stat-label">Progres simulasi</div>
-                <div style={{ marginTop: 6, height: 8, borderRadius: 999, background: '#e2e8f0', overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.round(animationProgress * 100)}%`, height: '100%', background: '#06b6d4' }} />
-                </div>
-                <div className="route-meta" style={{ marginTop: 6 }}>
-                  {Math.round(animationProgress * 100)}% perjalanan
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="infobox" style={{ fontSize: 11 }}>
-            Belum ada jalur aktif. Pilih aset/fasilitas dan klik waypoint pada peta untuk membuat rute otomatis.
-          </div>
-        )}
-
-        <div>
-          <div className="section-title">Area Rendaman</div>
-          {actionMessage && <div className="infobox" style={{ marginBottom: 8, borderColor: '#22c55e', color: '#22c55e', fontSize: 11 }}>{actionMessage}</div>}
-          {actionError && <div className="infobox" style={{ marginBottom: 8, borderColor: '#ef4444', color: '#ef4444', fontSize: 11 }}>{actionError}</div>}
-          {!canEditInundation && (
-            <div className="infobox" style={{ fontSize: 11 }}>
-              Role Anda saat ini hanya dapat melihat area rendaman.
-            </div>
-          )}
-          {inundation.length === 0 ? (
-            <div className="infobox" style={{ fontSize: 11 }}>
-              Belum ada data area rendaman.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {inundation.map(zone => (
-                <div key={zone.id} className="stat-box" style={{ padding: 10, display: 'grid', gap: 6 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1f2937' }}>{zone.name}</div>
-                  <div className="route-meta">Risiko: {(zone.risk_level || '-').toUpperCase()}</div>
-                  <div className="route-meta">Titik polygon: {zone.coordinates?.length || 0}</div>
-                  {canEditInundation && (
-                    <button
-                      className="btn btn-outline btn-sm"
-                      onClick={() => {
-                        setActionMessage('');
-                        setActionError('');
-                        setEditingInundationZone(zone);
-                      }}
-                    >
-                      Edit Area
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {canEditInundation && (
-            <button
-              className="btn btn-primary btn-sm"
-              style={{ marginTop: 8 }}
-              onClick={() => {
-                setActionMessage('');
-                setActionError('');
-                setEditingInundationZone({
-                  id: 0,
-                  name: '',
-                  risk_level: 'medium',
-                  coordinates: [],
-                } as any);
-              }}
-            >
-              + Tambah Area Rendaman
-            </button>
-          )}
-        </div>
-
-        <div style={{ marginTop: 'auto', padding: 10, borderRadius: 6, background: LEVEL_COLORS[detection.level] + '22', border: `1px solid ${LEVEL_COLORS[detection.level]}`, textAlign: 'center', color: LEVEL_COLORS[detection.level], fontSize: 12, fontWeight: 700 }}>
-          {user?.full_name || 'Operator'} • {user?.role?.toUpperCase()}
-          {sirenActive && <div style={{ fontSize: 10, marginTop: 4 }}>🔊 Sirine aktif — operator dapat mengendalikan penghentian sesuai SOP</div>}
+        <div style={{ fontSize: 10, color: '#64748b', borderTop: '1px solid #f1f5f9', paddingTop: 6 }}>
+          👤 {user?.full_name || 'Operator'} ({user?.role?.toUpperCase()})
         </div>
       </div>
 
-      <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-        {loadingLayers && <div className="infobox" style={{ margin: 12, fontSize: 11 }}>Memuat layer peta operator...</div>}
-        {loadError && <div className="infobox" style={{ margin: 12, fontSize: 11, borderColor: '#ef4444', color: '#ef4444' }}>{loadError}</div>}
+      {/* FLOATING CONTROL PANEL (Layers & Quick Focus) - Top Right */}
+      <div style={{
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        zIndex: 1000,
+        width: 260,
+        maxHeight: 'calc(100vh - 280px)',
+        overflowY: 'auto',
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(4px)',
+        borderRadius: 8,
+        boxShadow: '0 4px 20px rgba(15, 23, 42, 0.15)',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        border: '1px solid #e2e8f0',
+        color: '#1e293b'
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 700, borderBottom: '1px solid #f1f5f9', paddingBottom: 6 }}>🎛️ Layer Peta</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          {Object.entries(layers).map(([key, enabled]) => (
+            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 10, color: enabled ? '#1e293b' : '#64748b' }}>
+              <input type="checkbox" checked={enabled} onChange={() => toggleLayer(key as LayerKey)} style={{ accentColor: '#06b6d4' }} />
+              {key.replace(/_/g, ' ').toUpperCase()}
+            </label>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 700, borderBottom: '1px solid #f1f5f9', paddingBottom: 6, marginTop: 4 }}>🏥 Fokus Fasilitas</div>
+        <select
+          className="form-input"
+          style={{ fontSize: 11, padding: '4px 6px', height: 'auto' }}
+          onChange={(e) => {
+            const fac = mapFacilities.find(f => `fac-${f.id}` === e.target.value);
+            if (fac) setFocusCenter([fac.lat, fac.lng]);
+          }}
+          defaultValue=""
+        >
+          <option value="">-- Pilih Fasilitas --</option>
+          {mapFacilities.map(f => (
+            <option key={f.id} value={`fac-${f.id}`}>{facilityLabel(f.type)} • {f.name}</option>
+          ))}
+        </select>
+
+        <div style={{ fontSize: 12, fontWeight: 700, borderBottom: '1px solid #f1f5f9', paddingBottom: 6, marginTop: 4 }}>🚧 Fokus & Dispatch Aset</div>
+        <select
+          className="form-input"
+          style={{ fontSize: 11, padding: '4px 6px', height: 'auto' }}
+          value={selectedAssetId}
+          onChange={(e) => {
+            setSelectedAssetId(e.target.value);
+            setDispatchPlan(null);
+            setAnimationRunning(false);
+            setAnimationProgress(0);
+            const ast = dispatchAssets.find(a => a.id === e.target.value);
+            if (ast) setFocusCenter([ast.lat, ast.lng]);
+          }}
+        >
+          <option value="">-- Pilih Alat/Aset --</option>
+          {dispatchAssets.map(a => (
+            <option key={a.id} value={a.id}>{equipmentLabel(a.type)} • {a.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* FLOATING INUNDATION CONFIG PANEL - Right Center */}
+      <div style={{
+        position: 'absolute',
+        top: 310,
+        right: 10,
+        zIndex: 1000,
+        width: 260,
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(4px)',
+        borderRadius: 8,
+        boxShadow: '0 4px 20px rgba(15, 23, 42, 0.15)',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        border: '1px solid #e2e8f0',
+        color: '#1e293b'
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 700, borderBottom: '1px solid #f1f5f9', paddingBottom: 6 }}>🌊 Konfigurasi Area Rendaman</div>
+        
+        {actionMessage && <div style={{ fontSize: 10, color: '#22c55e', fontWeight: 600 }}>{actionMessage}</div>}
+        {actionError && <div style={{ fontSize: 10, color: '#ef4444', fontWeight: 600 }}>{actionError}</div>}
+
+        <select
+          className="form-input"
+          style={{ fontSize: 11, padding: '4px 6px', height: 'auto' }}
+          onChange={(e) => {
+            const zone = inundation.find(z => String(z.id) === e.target.value);
+            if (zone) {
+              setEditingInundationZone(zone);
+              const coords = zone.coordinates || [];
+              if (coords.length > 0) setFocusCenter([coords[0][1], coords[0][0]]);
+            }
+          }}
+          defaultValue=""
+        >
+          <option value="">-- Edit Area Rendaman --</option>
+          {inundation.map(z => (
+            <option key={z.id} value={z.id}>{z.name} ({(z.risk_level || '').toUpperCase()})</option>
+          ))}
+        </select>
+
+        {canEditInundation ? (
+          <button
+            className="btn btn-primary btn-sm"
+            style={{ width: '100%', fontSize: 11, padding: '6px 10px' }}
+            onClick={() => {
+              setActionMessage('');
+              setActionError('');
+              setEditingInundationZone({
+                id: 0,
+                name: '',
+                risk_level: 'medium',
+                coordinates: [],
+              } as any);
+            }}
+          >
+            ➕ Tambah Area Baru
+          </button>
+        ) : (
+          <div style={{ fontSize: 9, color: '#64748b', textAlign: 'center' }}>Role anda hanya dapat melihat area rendaman.</div>
+        )}
+      </div>
+
+      {/* DISPATCH ACTION FLOATING BANNER - Bottom Center */}
+      {selectedAsset && (
+        <div style={{
+          position: 'absolute',
+          bottom: 20,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          width: 'min(720px, 90%)',
+          background: 'rgba(15, 23, 42, 0.95)',
+          color: '#ffffff',
+          borderRadius: 8,
+          boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+          padding: '14px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#38bdf8', fontWeight: 700 }}>🚀 DISPATCH UNIT AKTIF</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>🚧 {selectedAsset.name} ({equipmentLabel(selectedAsset.type)})</div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: 8 }}>
+              {dispatchPlan ? (
+                <>
+                  <button className="btn btn-primary btn-sm" onClick={handleStartAnimation}>
+                    {animationRunning ? '🔄 Ulangi Animasi' : '▶ Mulai Perjalanan'}
+                  </button>
+                  <button className="btn btn-outline btn-sm" style={{ color: '#fff', borderColor: '#475569' }} onClick={handleResetDispatch}>
+                    Reset Rute
+                  </button>
+                </>
+              ) : (
+                <div style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center' }}>
+                  📌 Silakan klik lokasi mana saja pada peta untuk menentukan rute tujuan.
+                </div>
+              )}
+              <button className="btn btn-outline btn-sm" style={{ color: '#ef4444', borderColor: '#ef4444' }} onClick={() => {
+                setSelectedAssetId('');
+                setDispatchPlan(null);
+                setAnimationRunning(false);
+                setAnimationProgress(0);
+              }}>
+                Batal
+              </button>
+            </div>
+          </div>
+
+          {dispatchPlan && (
+            <div style={{ borderTop: '1px solid #334155', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#cbd5e1' }}>
+                <span><b>Rute Jalan:</b> {dispatchPlan.roadName}</span>
+                <span><b>Jarak:</b> {dispatchPlan.distanceKm.toFixed(2)} km</span>
+                <span><b>Estimasi:</b> {dispatchPlan.estimatedMinutes} menit</span>
+              </div>
+              
+              <div style={{ width: '100%', height: 6, background: '#334155', borderRadius: 999, overflow: 'hidden', marginTop: 4 }}>
+                <div style={{ width: `${Math.round(animationProgress * 100)}%`, height: '100%', background: '#06b6d4', transition: 'width 0.1s linear' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#94a3b8' }}>
+                <span>Titik Awal</span>
+                <span>Progres: {Math.round(animationProgress * 100)}%</span>
+                <span>Tujuan</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MAP VIEWPORT */}
+      <div style={{ width: '100%', height: '100%' }}>
+        {loadingLayers && <div style={{ position: 'absolute', top: 12, left: 320, zIndex: 1000, background: '#fff', padding: '6px 12px', borderRadius: 4, fontSize: 11, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>Memuat layer peta operator...</div>}
+        {loadError && <div style={{ position: 'absolute', top: 12, left: 320, zIndex: 1000, background: '#fee2e2', color: '#ef4444', padding: '6px 12px', borderRadius: 4, fontSize: 11, border: '1px solid #fca5a5' }}>{loadError}</div>}
 
         <MapContainer center={MAP_CENTER} zoom={14} style={{ height: '100%', width: '100%', background: '#0a1628' }}>
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+          <MapFocusController center={focusCenter} />
           <MapWaypointSelector enabled={Boolean(selectedAsset)} onSelect={handleWaypointSelected} />
 
           {layers.inundation && inundation.map(zone => (
@@ -873,24 +941,24 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               pathOptions={{ color: zone.risk_level === 'high' ? '#ef4444' : '#f97316', fillOpacity: 0.22, weight: 1.5, dashArray: '6,3' }}
             >
               <Popup>
-                <b>{zone.name}</b><br />
-                Risiko: {zone.risk_level}
-                {canEditInundation && (
-                  <>
-                    <br />
+                <div style={{ color: '#1e293b' }}>
+                  <b style={{ fontSize: 13 }}>🌊 Area Rendaman: {zone.name}</b><br />
+                  Risiko: <span style={{ fontWeight: 700, color: zone.risk_level === 'high' ? '#ef4444' : '#f97316' }}>{(zone.risk_level || '').toUpperCase()}</span><br />
+                  Catatan: {(zone as any).notes || '-'}<br />
+                  {canEditInundation && (
                     <button
-                      className="btn btn-outline btn-sm"
+                      className="btn btn-primary btn-sm"
                       onClick={() => {
                         setActionMessage('');
                         setActionError('');
                         setEditingInundationZone(zone);
                       }}
-                      style={{ marginTop: 6 }}
+                      style={{ marginTop: 8, fontSize: 11, width: '100%' }}
                     >
-                      Edit Area Rendaman
+                      ✏️ Edit Batas Area
                     </button>
-                  </>
-                )}
+                  )}
+                </div>
               </Popup>
             </Polygon>
           ))}
@@ -902,9 +970,11 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               pathOptions={{ color: '#22c55e', fillOpacity: 0.18, weight: 2 }}
             >
               <Popup>
-                <b>🟢 {zone.name}</b><br />
-                Elevasi: {zone.elevation_m}m<br />
-                Kapasitas: {zone.capacity?.toLocaleString('id-ID')} orang
+                <div style={{ color: '#1e293b' }}>
+                  <b style={{ fontSize: 13, color: '#22c55e' }}>🟢 Zona Aman: {zone.name}</b><br />
+                  Elevasi: {zone.elevation_m}m<br />
+                  Kapasitas: {zone.capacity?.toLocaleString('id-ID')} orang
+                </div>
               </Popup>
             </Polygon>
           ))}
@@ -916,10 +986,12 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               pathOptions={{ color: ROUTE_COLORS[route.status] || '#22c55e', weight: 4, opacity: 0.55, dashArray: route.status === 'clear' ? undefined : '8,4' }}
             >
               <Popup>
-                <b>{route.name}</b><br />
-                Status: {route.status}<br />
-                Estimasi: {route.estimated_time_min} menit<br />
-                Jarak: {(route.distance_m / 1000).toFixed(1)} km
+                <div style={{ color: '#1e293b' }}>
+                  <b>{route.name}</b><br />
+                  Status: {route.status}<br />
+                  Estimasi: {route.estimated_time_min} menit<br />
+                  Jarak: {(route.distance_m / 1000).toFixed(1)} km
+                </div>
               </Popup>
             </Polyline>
           ))}
@@ -930,11 +1002,12 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               pathOptions={{ color: '#06b6d4', weight: 6, opacity: 0.95, dashArray: '10,6' }}
             >
               <Popup>
-                <b>Rute Dispatch Operator</b><br />
-                Unit: {dispatchPlan.asset.name}<br />
-                Koridor utama: {dispatchPlan.roadName}<br />
-                Jarak: {dispatchPlan.distanceKm.toFixed(2)} km<br />
-                Estimasi: {dispatchPlan.estimatedMinutes} menit
+                <div style={{ color: '#1e293b' }}>
+                  <b>Rute Dispatch</b><br />
+                  Unit: {dispatchPlan.asset.name}<br />
+                  Jalan: {dispatchPlan.roadName}<br />
+                  Jarak: {dispatchPlan.distanceKm.toFixed(2)} km
+                </div>
               </Popup>
             </Polyline>
           )}
@@ -942,8 +1015,9 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
           {dispatchPlan && (
             <Marker position={dispatchPlan.waypoint} icon={waypointIcon}>
               <Popup>
-                <b>🎯 Waypoint Tujuan</b><br />
-                {dispatchPlan.waypoint[0].toFixed(5)}, {dispatchPlan.waypoint[1].toFixed(5)}
+                <div style={{ color: '#1e293b' }}>
+                  <b>🎯 Waypoint Tujuan</b>
+                </div>
               </Popup>
             </Marker>
           )}
@@ -951,9 +1025,11 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
           {movingPosition && dispatchPlan && (
             <Marker position={movingPosition} icon={movingAssetIcon}>
               <Popup>
-                <b>🚓 Unit Bergerak</b><br />
-                {dispatchPlan.asset.name}<br />
-                Progres: {Math.round(animationProgress * 100)}%
+                <div style={{ color: '#1e293b' }}>
+                  <b>🚓 Unit Bergerak</b><br />
+                  {dispatchPlan.asset.name}<br />
+                  Progres: {Math.round(animationProgress * 100)}%
+                </div>
               </Popup>
             </Marker>
           )}
@@ -966,10 +1042,12 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
                 pathOptions={{ color: sirenActive ? '#ef4444' : '#94a3b8', fillColor: sirenActive ? '#ef4444' : '#475569', fillOpacity: 0.8, weight: 2 }}
               >
                 <Popup>
-                  <b>🔊 {siren.name}</b><br />
-                  Kode: {siren.code}<br />
-                  Status: {siren.status}<br />
-                  Radius: {siren.radius_m}m
+                  <div style={{ color: '#1e293b' }}>
+                    <b>🔊 {siren.name}</b><br />
+                    Kode: {siren.code}<br />
+                    Status: {siren.status}<br />
+                    Radius: {siren.radius_m}m
+                  </div>
                 </Popup>
               </CircleMarker>
               <Circle
@@ -987,12 +1065,13 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               icon={mapDivIcon(FACILITY_ICONS[facility.type] || FACILITY_ICONS.lainnya || 'FAS', FACILITY_COLORS[facility.type] || '#757575')}
             >
               <Popup>
-                <b>{FACILITY_ICONS[facility.type]} {facility.name}</b><br />
-                Jenis: {facilityLabel(facility.type)}<br />
-                {facility.address && <>Alamat: {facility.address}<br /></>}
-                {facility.phone && <>Telp: {facility.phone}<br /></>}
-                {(facility.description || facility.notes) && <>Keterangan: {facility.description || facility.notes}<br /></>}
-                Koordinat: {facility.lat.toFixed(5)}, {facility.lng.toFixed(5)}
+                <div style={{ color: '#1e293b' }}>
+                  <b>{FACILITY_ICONS[facility.type]} {facility.name}</b><br />
+                  Jenis: {facilityLabel(facility.type)}<br />
+                  {facility.address && <>Alamat: {facility.address}<br /></>}
+                  {facility.phone && <>Telp: {facility.phone}<br /></>}
+                  {(facility.description || facility.notes) && <>Keterangan: {facility.description || facility.notes}<br /></>}
+                </div>
               </Popup>
             </Marker>
           ))}
@@ -1007,11 +1086,24 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               )}
             >
               <Popup>
-                <b>🚧 {item.name}</b><br />
-                Jenis: {equipmentLabel(item.type)}<br />
-                Status: {item.status}<br />
-                {(item.description || item.notes) && <>Keterangan: {item.description || item.notes}<br /></>}
-                Koordinat: {item.lat.toFixed(5)}, {item.lng.toFixed(5)}
+                <div style={{ color: '#1e293b' }}>
+                  <b>🚧 {item.name}</b><br />
+                  Jenis: {equipmentLabel(item.type)}<br />
+                  Status: <span style={{ fontWeight: 700 }}>{item.status}</span><br />
+                  {(item.description || item.notes) && <>Keterangan: {item.description || item.notes}<br /></>}
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ marginTop: 8, width: '100%', fontSize: 11 }}
+                    onClick={() => {
+                      setSelectedAssetId(`equipment-${item.id}`);
+                      setDispatchPlan(null);
+                      setAnimationRunning(false);
+                      setAnimationProgress(0);
+                    }}
+                  >
+                    🚀 Dispatch Aset Ini
+                  </button>
+                </div>
               </Popup>
             </Marker>
           ))}
@@ -1026,13 +1118,13 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
                 pathOptions={{ color, fillColor: color, fillOpacity: 0.9, weight: 2 }}
               >
                 <Popup>
-                  <b>📡 {sensor.name}</b><br />
-                  Kode: {sensor.code}<br />
-                  Status: {sensor.status}<br />
-                  Level: <b>{(sensor.water_level_cm || 0).toFixed(1)} cm</b><br />
-                  Δ3m: {(sensor.delta_3m || 0) > 0 ? '+' : ''}{(sensor.delta_3m || 0).toFixed(1)} cm<br />
-                  Quality: {sensor.quality?.toUpperCase()}<br />
-                  Update: {sensor.last_seen ? new Date(sensor.last_seen).toLocaleString('id-ID') : '-'}
+                  <div style={{ color: '#1e293b' }}>
+                    <b>📡 {sensor.name}</b><br />
+                    Kode: {sensor.code}<br />
+                    Status: {sensor.status}<br />
+                    Level: <b>{(sensor.water_level_cm || 0).toFixed(1)} cm</b><br />
+                    Δ3m: {(sensor.delta_3m || 0) > 0 ? '+' : ''}{(sensor.delta_3m || 0).toFixed(1)} cm
+                  </div>
                 </Popup>
               </CircleMarker>
             );

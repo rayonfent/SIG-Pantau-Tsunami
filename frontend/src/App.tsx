@@ -733,9 +733,9 @@ function PublicWarningPopup({ detection, sirenActive, onClose, navigate }: any) 
               </div>
             </div>
             <div className="stat-box">
-              <div className="stat-label">Keyakinan</div>
+              <div className="stat-label">Sensor Aktif</div>
               <div className="stat-value">
-                {Math.round((Number(detection.confidence_score) || 0) * 100)}%
+                {Object.keys(detection?.active_sensors || {}).length || 'Realtime'}
               </div>
             </div>
           </div>
@@ -771,7 +771,7 @@ function PublicDashboard({ data, detection, sirenActive, lastUpdated, navigate }
     <div className="page-section">
       <div className="grid-4 public-stat-grid">
         <div className="stat-box"><div className="stat-label">Status Tsunami</div><div className="stat-value" style={{ color: levelColor }}>{detection.level.toUpperCase()}</div><div className="stat-sub">{STATUS_GUIDE[detection.level] || STATUS_GUIDE.normal}</div></div>
-        <div className="stat-box"><div className="stat-label">Keyakinan Sistem</div><div className="stat-value">{Math.round((detection.confidence_score || 0) * 100)}%</div><div className="stat-sub">{detection.confidence_label || 'low'}</div></div>
+        <div className="stat-box"><div className="stat-label">Sensor Aktif</div><div className="stat-value">{Object.keys(detection?.active_sensors || {}).length || data.mapSensors.length || '-'}</div><div className="stat-sub">Titik pantau realtime</div></div>
         <div className="stat-box"><div className="stat-label">Sirine Publik</div><div className="stat-value" style={{ color: sirenActive ? '#ef4444' : '#22c55e' }}>{sirenActive ? 'AKTIF' : detection.level === 'normal' ? 'NORMAL' : 'SIAGA'}</div><div className="stat-sub">Status informasi masyarakat</div></div>
         <div className="stat-box"><div className="stat-label">Alert Aktif</div><div className="stat-value">{activeAlertCount}</div><div className="stat-sub">Update {lastUpdated || '-'}</div></div>
       </div>
