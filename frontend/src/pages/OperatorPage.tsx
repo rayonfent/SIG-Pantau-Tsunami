@@ -610,8 +610,20 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
         status: item.status,
         description: item.description || item.notes,
       })),
+      ...mapFacilities
+        .filter(f => f.type === 'polisi' || f.type === 'damkar')
+        .map(fac => ({
+          id: `facility-${fac.id}`,
+          name: fac.name,
+          type: fac.type,
+          category: 'equipment' as const,
+          lat: fac.lat,
+          lng: fac.lng,
+          status: fac.is_active ? 'available' : 'unavailable',
+          description: fac.description || fac.notes,
+        })),
     ],
-    [equipment],
+    [equipment, mapFacilities],
   );
 
   const selectedAsset = useMemo(
@@ -658,6 +670,65 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
   };
 
   const canEditInundation = user?.role === 'operator' || user?.role === 'admin';
+  const isOperator = user?.role === 'operator' || user?.role === 'admin';
+
+  const handleToggleFacilityStatus = async (facility: MapFacility) => {
+    try {
+      const payload = {
+        name: facility.name,
+        type: facility.type,
+        longitude: facility.lng,
+        latitude: facility.lat,
+        address: facility.address || '',
+        phone: facility.phone || '',
+        capacity: facility.capacity || null,
+        is_active: !facility.is_active,
+        notes: facility.notes || '',
+      };
+      await dataApi.updateFacility(facility.id, payload);
+      setMapFacilities(prev => prev.map(f => f.id === facility.id ? { ...f, is_active: !f.is_active } : f));
+      setActionMessage(`Status fasilitas ${facility.name} berhasil diubah.`);
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || 'Gagal mengubah status fasilitas');
+    }
+  };
+
+  const handleUpdateEquipmentStatus = async (equip: MapEquipment, newStatus: string) => {
+    try {
+      const payload = {
+        name: equip.name,
+        type: equip.type,
+        longitude: equip.lng,
+        latitude: equip.lat,
+        status: newStatus,
+        notes: equip.notes || '',
+      };
+      await dataApi.updateEquipment(equip.id, payload);
+      setEquipment(prev => prev.map(e => e.id === equip.id ? { ...e, status: newStatus } : e));
+      setActionMessage(`Status aset ${equip.name} berhasil diubah.`);
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || 'Gagal mengubah status aset');
+    }
+  };
+
+  const handleUpdateRouteStatus = async (route: EvacRoute, newStatus: string) => {
+    try {
+      const payload = {
+        name: route.name,
+        coordinates: route.geometry?.coordinates || route.coordinates || [],
+        direction: route.direction || 'Utara',
+        status: newStatus,
+        capacity_persons: route.capacity_persons || 500,
+        priority: route.priority || 1,
+        notes: route.notes || '',
+      };
+      await dataApi.updateRoute(route.id, payload);
+      setEvacRoutes(prev => prev.map(r => r.id === route.id ? { ...r, status: newStatus as any } : r));
+      setActionMessage(`Status rute ${route.name} berhasil diubah.`);
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || 'Gagal mengubah status rute');
+    }
+  };
 
   const handleInundationSaved = async (message: string) => {
     setEditingInundationZone(null);
@@ -986,11 +1057,26 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               pathOptions={{ color: ROUTE_COLORS[route.status] || '#22c55e', weight: 4, opacity: 0.55, dashArray: route.status === 'clear' ? undefined : '8,4' }}
             >
               <Popup>
-                <div style={{ color: '#1e293b' }}>
-                  <b>{route.name}</b><br />
-                  Status: {route.status}<br />
+                <div style={{ color: '#1e293b', minWidth: 180 }}>
+                  <b style={{ fontSize: 13 }}>{route.name}</b><br />
                   Estimasi: {route.estimated_time_min} menit<br />
-                  Jarak: {(route.distance_m / 1000).toFixed(1)} km
+                  Jarak: {(route.distance_m / 1000).toFixed(1)} km<br />
+                  <div style={{ marginTop: 8 }}>
+                    <label style={{ fontSize: 10, color: '#64748b' }}>Status Jalur:</label>
+                    <select 
+                      className="form-input" 
+                      style={{ fontSize: 11, padding: '4px 6px', marginTop: 4, height: 'auto', width: '100%' }}
+                      value={route.status}
+                      disabled={!isOperator}
+                      onChange={(e) => handleUpdateRouteStatus(route, e.target.value)}
+                    >
+                      <option value="clear">Clear</option>
+                      <option value="warning">Warning</option>
+                      <option value="congested">Congested</option>
+                      <option value="blocked">Blocked</option>
+                      <option value="maintenance">Maintenance</option>
+                    </select>
+                  </div>
                 </div>
               </Popup>
             </Polyline>
@@ -1065,12 +1151,40 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               icon={mapDivIcon(FACILITY_ICONS[facility.type] || FACILITY_ICONS.lainnya || 'FAS', FACILITY_COLORS[facility.type] || '#757575')}
             >
               <Popup>
-                <div style={{ color: '#1e293b' }}>
-                  <b>{FACILITY_ICONS[facility.type]} {facility.name}</b><br />
+                <div style={{ color: '#1e293b', minWidth: 180 }}>
+                  <b style={{ fontSize: 13 }}>{FACILITY_ICONS[facility.type]} {facility.name}</b><br />
                   Jenis: {facilityLabel(facility.type)}<br />
+                  Status: <span style={{ fontWeight: 700, color: facility.is_active !== false ? '#22c55e' : '#ef4444' }}>{facility.is_active !== false ? 'Aktif' : 'Non-Aktif'}</span><br />
                   {facility.address && <>Alamat: {facility.address}<br /></>}
                   {facility.phone && <>Telp: {facility.phone}<br /></>}
                   {(facility.description || facility.notes) && <>Keterangan: {facility.description || facility.notes}<br /></>}
+                  
+                  {isOperator && (
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <button 
+                        className="btn btn-outline btn-sm" 
+                        style={{ fontSize: 11, width: '100%' }}
+                        onClick={() => handleToggleFacilityStatus(facility)}
+                      >
+                        {facility.is_active !== false ? '🔴 Non-Aktifkan Fasilitas' : '🟢 Aktifkan Fasilitas'}
+                      </button>
+
+                      {(facility.type === 'polisi' || facility.type === 'damkar') && (
+                        <button
+                          className="btn btn-primary btn-sm"
+                          style={{ fontSize: 11, width: '100%' }}
+                          onClick={() => {
+                            setSelectedAssetId(`facility-${facility.id}`);
+                            setDispatchPlan(null);
+                            setAnimationRunning(false);
+                            setAnimationProgress(0);
+                          }}
+                        >
+                          🚀 Dispatch Unit {facility.type === 'polisi' ? 'Polisi' : 'Damkar'}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </Popup>
             </Marker>
@@ -1086,11 +1200,28 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
               )}
             >
               <Popup>
-                <div style={{ color: '#1e293b' }}>
-                  <b>🚧 {item.name}</b><br />
+                <div style={{ color: '#1e293b', minWidth: 180 }}>
+                  <b style={{ fontSize: 13 }}>🚧 {item.name}</b><br />
                   Jenis: {equipmentLabel(item.type)}<br />
-                  Status: <span style={{ fontWeight: 700 }}>{item.status}</span><br />
                   {(item.description || item.notes) && <>Keterangan: {item.description || item.notes}<br /></>}
+                  
+                  {isOperator && (
+                    <div style={{ marginTop: 8 }}>
+                      <label style={{ fontSize: 10, color: '#64748b' }}>Status Aset:</label>
+                      <select 
+                        className="form-input" 
+                        style={{ fontSize: 11, padding: '4px 6px', marginTop: 4, height: 'auto', width: '100%' }}
+                        value={item.status}
+                        onChange={(e) => handleUpdateEquipmentStatus(item, e.target.value)}
+                      >
+                        <option value="available">Available</option>
+                        <option value="in_use">In Use</option>
+                        <option value="maintenance">Maintenance</option>
+                        <option value="unavailable">Unavailable</option>
+                      </select>
+                    </div>
+                  )}
+                  
                   <button
                     className="btn btn-primary btn-sm"
                     style={{ marginTop: 8, width: '100%', fontSize: 11 }}

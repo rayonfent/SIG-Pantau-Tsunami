@@ -182,10 +182,10 @@ async def map_facilities():
                 address,
                 phone,
                 capacity,
+                is_active,
                 notes,
                 notes AS description
             FROM facilities
-            WHERE is_active = TRUE
             ORDER BY type, name
             """
         )

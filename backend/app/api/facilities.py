@@ -170,7 +170,6 @@ async def list_facilities():
                 ST_Y(location::geometry) AS lat,
                 ST_X(location::geometry) AS lng
             FROM facilities
-            WHERE is_active = TRUE
             ORDER BY type, name
             """
         )

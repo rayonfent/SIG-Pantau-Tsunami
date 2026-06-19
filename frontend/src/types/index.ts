@@ -67,6 +67,7 @@ export interface MapSiren {
 export interface MapFacility {
   id: string; name: string; type: string;
   lng: number; lat: number; phone: string; address?: string; capacity?: number; notes?: string; description?: string;
+  is_active?: boolean;
 }
 
 export interface Facility {
