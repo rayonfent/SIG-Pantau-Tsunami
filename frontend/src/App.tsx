@@ -264,7 +264,7 @@ export default function App() {
         <main className="main-content">
           <header className="topbar" style={{ borderBottomColor: effectiveDetection.level !== 'normal' ? levelColor : '#e2e8f0' }}>
             <div className="topbar-left">
-              <h1 className="page-title">Tampilan Operator</h1>
+              <h1 className="page-title">Pantau Tsunami</h1>
             </div>
             <div className="topbar-right">
               <span className="area-label">📍 Panjang, Bandar Lampung</span>
@@ -342,7 +342,7 @@ export default function App() {
         <div className="sidebar-header">
           <div className="logo">
             <span className="logo-icon">🌊</span>
-            {sidebarOpen && <span className="logo-text">SIG-PANTAU<br/><small>TSUNAMI</small></span>}
+            {sidebarOpen && <span className="logo-text">PANTAU<br/><small>TSUNAMI</small></span>}
           </div>
           <button className="toggle-btn" onClick={() => setSidebarOpen(p => !p)}>
             {sidebarOpen ? '◀' : '▶'}
@@ -602,9 +602,9 @@ function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, 
       />
       <header className="public-header">
         <div className="public-header-inner">
-          <div className="public-agency-mark" aria-hidden="true">BP</div>
+          <div className="public-agency-mark" aria-hidden="true" style={{ background: 'transparent', fontSize: '24px' }}>🌊</div>
           <div className="public-brand">
-            <h1>SIG-PANTAU TSUNAMI</h1>
+            <h1>PANTAU TSUNAMI</h1>
             <p>Sistem Informasi Geografis Deteksi Dini Tsunami</p>
             <span>Panjang, Bandar Lampung</span>
           </div>
@@ -649,7 +649,7 @@ function PublicPortal({ currentPath, navigate, sensors, detection, sirenActive, 
       <footer className="public-footer">
         <div className="public-footer-inner">
           <div>
-            <strong>SIG-PANTAU TSUNAMI</strong>
+            <strong>PANTAU TSUNAMI</strong>
             <p>Sistem Informasi Publik Deteksi Dini Tsunami<br />Panjang, Bandar Lampung</p>
           </div>
           <p>Informasi pada portal ini digunakan sebagai panduan awal. Ikuti arahan petugas dan informasi resmi saat kondisi darurat.</p>

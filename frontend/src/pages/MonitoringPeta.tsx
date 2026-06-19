@@ -22,7 +22,7 @@ const LAYER_DEFAULTS = {
 
 const mapDivIcon = (label: string, color: string) => L.divIcon({
   className: 'asset-div-icon',
-  html: `<div style="background:${color};color:#ffffff;border:2px solid #ffffff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;box-shadow:0 4px 12px rgba(15,23,42,.18)">${label}</div>`,
+  html: `<div style="background:${color};color:#ffffff;border:2px solid #ffffff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;box-shadow:0 4px 12px rgba(15,23,42,.18)">${label}</div>`,
   iconSize: [34, 34],
   iconAnchor: [17, 17],
   popupAnchor: [0, -17],
@@ -31,6 +31,14 @@ const mapDivIcon = (label: string, color: string) => L.divIcon({
 const facilityLabel = (type: string) => FACILITY_LABELS[type] || type || 'Lainnya';
 const equipmentLabel = (type: string) => EQUIPMENT_LABELS[type] || type || 'Lainnya';
 const equipmentIcon = (type: string) => EQUIPMENT_ICONS[type] || EQUIPMENT_ICONS.lainnya || 'AST';
+
+const ROUTE_STATUS_LABELS: Record<string, string> = {
+  clear: 'Aman',
+  warning: 'Waspada',
+  congested: 'Padat',
+  maintenance: 'Pemeliharaan',
+  blocked: 'Terblokir',
+};
 
 export default function MonitoringPeta({ sensors, detection, sirenActive, user }: Props) {
   const [mapSensors, setMapSensors] = useState<MapSensor[]>([]);
@@ -157,8 +165,8 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 110px)', gap: 12 }}>
-      {/* Layer control */}
-      <div className="card" style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Layer control & Legend */}
+      <div className="card" style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
         <div className="card-title">🗂️ Layer & Legenda</div>
         {loadingLayers && <div className="infobox" style={{ fontSize: 10 }}>Memuat layer peta...</div>}
         {loadError && <div className="infobox" style={{ fontSize: 10, borderColor: '#ef4444', color: '#ef4444' }}>{loadError}</div>}
@@ -168,8 +176,10 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
             {key.replace(/_/g, ' ').toUpperCase()}
           </label>
         ))}
+
+        {/* ── Legenda Sensor ── */}
         <div style={{ marginTop: 8, borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
-          <div className="section-title">Legenda Sensor</div>
+          <div className="section-title">📡 Sensor</div>
           {[
             { color: '#22c55e', label: 'Normal' },
             { color: '#eab308', label: 'Suspect (Δ≥15cm)' },
@@ -177,33 +187,64 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
             { color: '#ef4444', label: 'Siaga (Δ≥40cm)' },
             { color: '#7c3aed', label: 'AWAS (Δ≥60cm)' },
           ].map(({ color, label }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#94a3b8' }}>
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#64748b' }}>
               <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
               {label}
             </div>
           ))}
+        </div>
 
-          <div className="section-title" style={{ marginTop: 8 }}>Fasilitas</div>
+        {/* ── Legenda Fasilitas ── */}
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
+          <div className="section-title">🏥 Fasilitas</div>
           {Object.entries(FACILITY_ICONS).map(([type, icon]) => (
-            <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#94a3b8' }}>
-              <span>{icon}</span>
-              <span style={{ color: FACILITY_COLORS[type] }}>{type.toUpperCase()}</span>
+            <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#64748b' }}>
+              <span style={{ fontSize: 14 }}>{icon}</span>
+              <span style={{ color: FACILITY_COLORS[type] || '#757575', fontWeight: 600 }}>{FACILITY_LABELS[type] || type.toUpperCase()}</span>
             </div>
           ))}
         </div>
 
-        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, fontSize: 10, color: '#64748b' }}>
-          <div style={{ marginBottom: 4 }}>
-            <span style={{ display: 'inline-block', width: 24, height: 4, background: '#22c55e', marginRight: 6 }} />
-            Jalur Clear
+        {/* ── Legenda Jalur Evakuasi ── */}
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
+          <div className="section-title">🚶 Jalur Evakuasi</div>
+          {Object.entries(ROUTE_COLORS).map(([status, color]) => (
+            <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#64748b' }}>
+              <span style={{ display: 'inline-block', width: 24, height: 4, background: color, borderRadius: 2, flexShrink: 0 }} />
+              {ROUTE_STATUS_LABELS[status] || status.toUpperCase()}
+            </div>
+          ))}
+        </div>
+
+        {/* ── Legenda Peralatan Berat ── */}
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
+          <div className="section-title">🚧 Peralatan Berat</div>
+          {Object.entries(EQUIPMENT_ICONS).map(([type, icon]) => (
+            <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#64748b' }}>
+              <span style={{ fontSize: 14 }}>{icon}</span>
+              <span>{EQUIPMENT_LABELS[type] || type.toUpperCase()}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Legenda Lainnya ── */}
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
+          <div className="section-title">Lainnya</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#64748b' }}>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#22c55e', border: '2px solid #86efac', flexShrink: 0 }} />
+            Zona Aman / Titik Kumpul
           </div>
-          <div style={{ marginBottom: 4 }}>
-            <span style={{ display: 'inline-block', width: 24, height: 4, background: '#f97316', marginRight: 6 }} />
-            Congested
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#64748b' }}>
+            <span style={{ fontSize: 14 }}>🔊</span>
+            Sirine
           </div>
-          <div>
-            <span style={{ display: 'inline-block', width: 24, height: 4, background: '#ef4444', marginRight: 6 }} />
-            Blocked
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#64748b' }}>
+            <div style={{ width: 10, height: 10, background: '#ef4444', opacity: 0.5, borderRadius: 2, flexShrink: 0 }} />
+            Area Rendaman (Risiko Tinggi)
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10, color: '#64748b' }}>
+            <div style={{ width: 10, height: 10, background: '#f97316', opacity: 0.5, borderRadius: 2, flexShrink: 0 }} />
+            Area Rendaman (Risiko Sedang)
           </div>
         </div>
 
@@ -241,24 +282,40 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
                 fillOpacity: 0.25, weight: 1.5, dashArray: '6,3'
               }}
             >
-              <Popup><b>{iz.name}</b><br />Risiko: {iz.risk_level}</Popup>
+              <Popup><b>🌊 {iz.name}</b><br />Risiko: {iz.risk_level}</Popup>
             </Polygon>
           ))}
 
           {/* Safe zones */}
           {layers.safe_zones && safeZones.filter(sz => sz.is_active !== false).map(sz => (
-            <Polygon
-              key={sz.id}
-              positions={sz.coordinates.map(([lng, lat]) => [lat, lng])}
-              pathOptions={{ color: '#22c55e', fillOpacity: 0.2, weight: 2 }}
-            >
-              <Popup>
-                <b>🟢 {sz.name}</b><br />
-                Elevasi: {sz.elevation_m}m<br />
-                Kapasitas: {sz.capacity?.toLocaleString('id-ID')} orang<br />
-                Fasilitas: {sz.facilities?.join(', ') || '-'}
-              </Popup>
-            </Polygon>
+            <React.Fragment key={sz.id}>
+              <Polygon
+                positions={sz.coordinates.map(([lng, lat]) => [lat, lng])}
+                pathOptions={{ color: '#22c55e', fillOpacity: 0.2, weight: 2 }}
+              >
+                <Popup>
+                  <b>🟢 {sz.name}</b><br />
+                  Elevasi: {sz.elevation_m}m<br />
+                  Kapasitas: {sz.capacity?.toLocaleString('id-ID')} orang<br />
+                  Fasilitas: {sz.facilities?.join(', ') || '-'}
+                </Popup>
+              </Polygon>
+              {/* Titik kumpul marker di tengah zona aman */}
+              {sz.coordinates.length >= 3 && (() => {
+                const center = sz.coordinates.reduce(
+                  (acc, [lng, lat]) => [acc[0] + lat, acc[1] + lng],
+                  [0, 0]
+                ).map(v => v / sz.coordinates.length) as [number, number];
+                return (
+                  <Marker
+                    position={[center[0], center[1]]}
+                    icon={mapDivIcon('⛑️', '#22c55e')}
+                  >
+                    <Popup><b>📍 Titik Kumpul</b><br />{sz.name}</Popup>
+                  </Marker>
+                );
+              })()}
+            </React.Fragment>
           ))}
 
           {/* Evacuation routes */}
@@ -272,8 +329,8 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
               }}
             >
               <Popup>
-                <b>{r.name}</b><br />
-                Status: {r.status}<br />
+                <b>🚶 {r.name}</b><br />
+                Status: {ROUTE_STATUS_LABELS[r.status] || r.status}<br />
                 Arah: {r.direction || '-'}<br />
                 Keterangan: {r.description || r.notes || '-'}<br />
                 Kapasitas: {r.capacity_persons?.toLocaleString('id-ID') || '-'} orang<br />
@@ -287,15 +344,9 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
           {/* Sirens */}
           {layers.sirens && mapSirens.map(s => (
             <React.Fragment key={s.id}>
-              <CircleMarker
-                center={[s.lat, s.lng]}
-                radius={sirenActive ? 14 : 8}
-                pathOptions={{
-                  color: sirenActive ? '#ef4444' : '#94a3b8',
-                  fillColor: sirenActive ? '#ef4444' : '#475569',
-                  fillOpacity: 0.8,
-                  weight: 2,
-                }}
+              <Marker
+                position={[s.lat, s.lng]}
+                icon={mapDivIcon('🔊', sirenActive ? '#ef4444' : '#475569')}
               >
                 <Popup>
                   <b>🔊 {s.name}</b><br />
@@ -305,7 +356,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
                   Otomatis: {s.is_auto_enabled ? 'Ya' : 'Tidak'}<br />
                   Aktivasi terakhir: {s.last_activated ? new Date(s.last_activated).toLocaleString('id-ID') : '-'}
                 </Popup>
-              </CircleMarker>
+              </Marker>
               {/* Radius ring */}
               <Circle
                 center={[s.lat, s.lng]}
@@ -324,7 +375,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
             <Marker
               key={f.id}
               position={[f.lat, f.lng]}
-              icon={mapDivIcon(FACILITY_ICONS[f.type] || FACILITY_ICONS.lainnya || 'FAS', FACILITY_COLORS[f.type] || '#757575')}
+              icon={mapDivIcon(FACILITY_ICONS[f.type] || FACILITY_ICONS.lainnya || '📌', FACILITY_COLORS[f.type] || '#757575')}
             >
               <Popup>
                 <b>{FACILITY_ICONS[f.type]} {f.name}</b><br />
@@ -358,11 +409,10 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
           {layers.sensors && mergedSensors.map(s => {
             const color = getSensorColor(s.delta_3m || 0);
             return (
-              <CircleMarker
+              <Marker
                 key={s.id}
-                center={[s.lat, s.lng]}
-                radius={10}
-                pathOptions={{ color, fillColor: color, fillOpacity: 0.9, weight: 2 }}
+                position={[s.lat, s.lng]}
+                icon={mapDivIcon('📡', color)}
               >
                 <Popup>
                   <b>📡 {s.name}</b><br />
@@ -373,7 +423,7 @@ export default function MonitoringPeta({ sensors, detection, sirenActive, user }
                   Quality: {s.quality?.toUpperCase()}<br />
                   Update: {s.last_seen ? new Date(s.last_seen).toLocaleString('id-ID') : '-'}
                 </Popup>
-              </CircleMarker>
+              </Marker>
             );
           })}
         </MapContainer>
