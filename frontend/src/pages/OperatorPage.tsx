@@ -649,9 +649,42 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
     setLayers(current => ({ ...current, [key]: !current[key] }));
   };
 
-  const handleWaypointSelected = (waypoint: LatLngTuple) => {
+  const handleWaypointSelected = async (waypoint: LatLngTuple) => {
     if (!selectedAsset) return;
-    const nextPlan = buildDispatchPlan(selectedAsset, waypoint, evacRoutes);
+    
+    // Fallback direct distance
+    const assetPoint: LatLngTuple = [selectedAsset.lat, selectedAsset.lng];
+    let routeCoordinates: LatLngTuple[] = [assetPoint, waypoint];
+    let distanceKm = routeDistanceKm(routeCoordinates);
+    let roadName = 'Rute OSRM';
+    
+    try {
+      const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${selectedAsset.lng},${selectedAsset.lat};${waypoint[1]},${waypoint[0]}?overview=full&geometries=geojson`);
+      if (response.ok) {
+        const data = await response.json();
+        const coords = data?.routes?.[0]?.geometry?.coordinates;
+        if (Array.isArray(coords) && coords.length > 1) {
+          routeCoordinates = coords.map(([lng, lat]: [number, number]) => [lat, lng] as LatLngTuple);
+          distanceKm = (data.routes[0].distance || 0) / 1000;
+          if (data.routes[0].legs?.[0]?.summary) {
+             roadName = data.routes[0].legs[0].summary;
+          }
+        }
+      }
+    } catch (e) {
+      console.error('OSRM error', e);
+    }
+    
+    const nextPlan: DispatchPlan = {
+      asset: selectedAsset,
+      waypoint,
+      routeCoordinates,
+      distanceKm,
+      estimatedMinutes: Math.max(1, Math.round((distanceKm / OPERATOR_SPEED_KMH) * 60)),
+      roadName,
+      travelSpeedKmh: OPERATOR_SPEED_KMH,
+    };
+
     setDispatchPlan(nextPlan);
     setAnimationRunning(false);
     setAnimationProgress(0);
@@ -951,7 +984,7 @@ export default function OperatorPage({ sensors, detection, sirenActive, user }: 
             <div style={{ display: 'flex', gap: 8 }}>
               {dispatchPlan ? (
                 <>
-                  <button className="btn btn-primary btn-sm" onClick={handleStartAnimation}>
+                  <button className="btn btn-primary btn-sm" style={{ color: '#000' }} onClick={handleStartAnimation}>
                     {animationRunning ? '🔄 Ulangi Animasi' : '▶ Mulai Perjalanan'}
                   </button>
                   <button className="btn btn-outline btn-sm" style={{ color: '#fff', borderColor: '#475569' }} onClick={handleResetDispatch}>
